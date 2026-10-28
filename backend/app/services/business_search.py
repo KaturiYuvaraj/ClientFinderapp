@@ -74,7 +74,20 @@ class BusinessSearchService:
         # 5. Analyze each business with AI concurrently
         async def analyze_item(biz: NormalizedBusiness) -> DiscoveredLeadItem:
             analysis = await ai_service.analyze_business(biz, service_str)
-            
+
+            has_website = bool(biz.website and len(biz.website.strip()) > 3)
+            has_mobile_app = bool(biz.has_mobile_app)
+            has_digital_marketing = bool(
+                biz.has_social_media or (has_website and (biz.review_count or 0) >= 40)
+            )
+            missing_services = []
+            if not has_website:
+                missing_services.append("No Website / Web App")
+            if not has_mobile_app:
+                missing_services.append("No Mobile App")
+            if not has_digital_marketing:
+                missing_services.append("No Digital Marketing")
+
             # Check if saved
             is_saved = False
             saved_id = None
@@ -102,6 +115,11 @@ class BusinessSearchService:
                 source=biz.source,
                 source_url=biz.source_url,
                 provider_id=biz.provider_id,
+                has_social_media=biz.has_social_media,
+                has_website=has_website,
+                has_mobile_app=has_mobile_app,
+                has_digital_marketing=has_digital_marketing,
+                missing_services=missing_services,
                 lead_score=analysis.lead_score,
                 opportunity_type=analysis.opportunity_type,
                 opportunity_reason=analysis.reason,
@@ -115,8 +133,16 @@ class BusinessSearchService:
 
         analyzed_items = await asyncio.gather(*[analyze_item(b) for b in raw_businesses])
 
-        # Sort by lead score descending
-        sorted_items = sorted(analyzed_items, key=lambda x: x.lead_score, reverse=True)
+        # Sort by lead score descending, prioritizing leads missing all 3 (Website/WebApp, Mobile App, Digital Marketing) with a verified phone
+        sorted_items = sorted(
+            analyzed_items,
+            key=lambda x: (
+                x.lead_score,
+                len(x.missing_services) == 3 and bool(x.phone),
+                len(x.missing_services),
+            ),
+            reverse=True,
+        )
 
         return SearchResponse(
             query=query,

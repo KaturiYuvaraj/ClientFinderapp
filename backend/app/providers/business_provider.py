@@ -40,6 +40,75 @@ def _safe_int(val, default: int = 0) -> int:
         return default
 
 
+CORPORATE_CHAIN_KEYWORDS = {
+    "mcdonald", "starbucks", "subway", "domino", "kfc", "kentucky fried",
+    "burger king", "pizza hut", "taco bell", "dunkin", "chipotle", "wendy",
+    "papa john", "baskin robbins", "costa coffee", "tim hortons", "7-eleven",
+    "7 eleven", "haldiram", "barbeque nation", "cafe coffee day", "walmart",
+    "target", "walgreens", "cvs pharmacy", "tesco", "sainsbury", "pret a manger",
+    "popeyes", "shake shack", "five guys", "little caesars", "olive garden",
+    "applebee", "ihop", "denny's", "panera bread", "chick-fil-a", "panda express",
+}
+
+SOCIAL_ONLY_DOMAINS = (
+    "facebook.com", "fb.com", "instagram.com", "instagr.am", "twitter.com",
+    "x.com", "tiktok.com", "linkedin.com", "youtube.com", "linktr.ee",
+    "wa.me", "t.me", "pinterest.com",
+)
+
+AGGREGATOR_ONLY_DOMAINS = (
+    "zomato.com", "swiggy.com", "ubereats.com", "doordash.com", "grubhub.com",
+    "seamless.com", "deliveroo.", "just-eat.", "yelp.com", "tripadvisor.",
+    "justdial.com", "magicpin.in", "eazyDiner.", "opentable.com", "resy.com",
+)
+
+
+def _is_corporate_chain(name: str, raw_tags: dict) -> bool:
+    if not name:
+        return False
+    if raw_tags.get("brand:wikidata") or raw_tags.get("operator:wikidata"):
+        return True
+    n_low = name.lower()
+    return any(chain in n_low for chain in CORPORATE_CHAIN_KEYWORDS)
+
+
+def _classify_digital_presence(raw_website: str, raw_tags: dict) -> tuple:
+    """
+    Separates true official Website/WebApp URLs from social-only profiles or aggregators,
+    and detects whether the business has social media (digital marketing) or a mobile app.
+    Returns: (official_website: str, has_social_media: bool, has_mobile_app: bool)
+    """
+    has_social = any(
+        bool(raw_tags.get(k))
+        for k in (
+            "contact:facebook", "facebook", "contact:instagram", "instagram",
+            "contact:tiktok", "tiktok", "contact:twitter", "twitter",
+            "contact:youtube", "youtube", "contact:linkedin", "linkedin",
+        )
+    )
+    has_app = any(
+        bool(raw_tags.get(k))
+        for k in ("app:ios", "app:android", "app:apple", "app:google_play")
+    )
+
+    official_website = ""
+    if raw_website:
+        w_clean = str(raw_website).strip()
+        if not w_clean.startswith(("http://", "https://")) and "." in w_clean and not w_clean.startswith("@"):
+            w_clean = f"https://{w_clean}"
+        w_low = w_clean.lower()
+        if "play.google.com" in w_low or "apps.apple.com" in w_low:
+            has_app = True
+        elif any(soc in w_low for soc in SOCIAL_ONLY_DOMAINS):
+            has_social = True
+        elif any(agg in w_low for agg in AGGREGATOR_ONLY_DOMAINS):
+            pass
+        elif w_clean.startswith(("http://", "https://")):
+            official_website = w_clean
+
+    return official_website, has_social, has_app
+
+
 class BusinessDataProvider(ABC):
     @abstractmethod
     async def search(self, query: SearchRequest) -> List[NormalizedBusiness]:
@@ -547,7 +616,10 @@ out tags center 60;
                                 if raw_phone:
                                     phone = re.split(r'[;/]', str(raw_phone))[0].strip()
 
-                                # Website extraction — checks domains, brand URLs, and social profiles
+                                if _is_corporate_chain(name, tags):
+                                    continue
+
+                                # Website extraction — separates true official websites from social/aggregator links
                                 raw_website = (
                                     tags.get("website") or
                                     tags.get("contact:website") or
@@ -558,36 +630,7 @@ out tags center 60;
                                     tags.get("operator:website") or
                                     tags.get("website:en") or ""
                                 )
-
-                                # If no direct website, check official social media pages
-                                if not raw_website:
-                                    fb = tags.get("contact:facebook") or tags.get("facebook")
-                                    insta = tags.get("contact:instagram") or tags.get("instagram")
-                                    tw = tags.get("contact:twitter") or tags.get("twitter")
-                                    li = tags.get("contact:linkedin") or tags.get("linkedin")
-                                    if fb:
-                                        fb_s = str(fb)
-                                        raw_website = fb_s if "facebook.com" in fb_s else f"https://facebook.com/{fb_s.lstrip('@')}"
-                                    elif insta:
-                                        in_s = str(insta)
-                                        raw_website = in_s if "instagram.com" in in_s else f"https://instagram.com/{in_s.lstrip('@')}"
-                                    elif tw:
-                                        tw_s = str(tw)
-                                        raw_website = tw_s if "twitter.com" in tw_s or "x.com" in tw_s else f"https://x.com/{tw_s.lstrip('@')}"
-                                    elif li:
-                                        li_s = str(li)
-                                        raw_website = li_s if "linkedin.com" in li_s else f"https://linkedin.com/company/{li_s.lstrip('@')}"
-
-                                # Clean and ensure proper protocol for URLs
-                                display_website = ""
-                                if raw_website:
-                                    w_clean = str(raw_website).strip()
-                                    if w_clean.startswith(("http://", "https://")):
-                                        display_website = w_clean
-                                    elif "." in w_clean and not w_clean.startswith("@"):
-                                        display_website = f"https://{w_clean}"
-                                    else:
-                                        display_website = w_clean
+                                display_website, has_social, has_app = _classify_digital_presence(raw_website, tags)
 
                                 opening_hours = tags.get("opening_hours", "")
                                 if opening_hours and len(address) < 80:
@@ -607,18 +650,21 @@ out tags center 60;
                                         review_count=_safe_int(tags.get("review_count"), 0),
                                         source="OpenStreetMap Live Data",
                                         source_url=display_website or f"https://www.openstreetmap.org/{el_type}/{el.get('id')}",
-                                        provider_id=f"osm_{el.get('id')}"
+                                        provider_id=f"osm_{el.get('id')}",
+                                        has_social_media=has_social,
+                                        has_mobile_app=has_app,
                                     )
                                 )
                             except Exception as item_err:
                                 logger.debug(f"Skipping malformed OSM element: {item_err}")
                                 continue
 
-                        # Deduplicate by name and prioritize genuine businesses with verified phone numbers
+                        # Deduplicate by name and prioritize businesses with verified phone & missing Web/App/Marketing
                         seen_names = set()
                         unique_results = []
                         results.sort(
                             key=lambda b: (
+                                1 if (b.phone and not b.website and not b.has_mobile_app and not b.has_social_media) else 0,
                                 1 if (b.phone and not b.website) else 0,
                                 1 if b.phone else 0,
                                 1 if b.website else 0,
@@ -816,6 +862,9 @@ class GeoapifyProvider(BusinessDataProvider):
                             contact = props.get("contact", {})
                             raw_data = props.get("datasource", {}).get("raw", {})
 
+                            if _is_corporate_chain(name, raw_data):
+                                continue
+
                             raw_phone = (
                                 contact.get("phone") or
                                 props.get("phone") or
@@ -838,17 +887,7 @@ class GeoapifyProvider(BusinessDataProvider):
                                 raw_data.get("url") or
                                 raw_data.get("contact:url") or ""
                             )
-
-                            # Clean website url
-                            website = ""
-                            if raw_website:
-                                w_clean = str(raw_website).strip()
-                                if w_clean.startswith(("http://", "https://")):
-                                    website = w_clean
-                                elif "." in w_clean and not w_clean.startswith("@"):
-                                    website = f"https://{w_clean}"
-                                else:
-                                    website = w_clean
+                            website, has_social, has_app = _classify_digital_presence(raw_website, raw_data)
 
                             addr = str(props.get("formatted") or props.get("address_line1") or query.location)
                             place_id = str(props.get("place_id", ""))
@@ -872,16 +911,19 @@ class GeoapifyProvider(BusinessDataProvider):
                                     review_count=review_cnt,
                                     source="Geoapify Places",
                                     source_url=website or f"https://www.google.com/maps/search/?api=1&query={name}+{query.location}",
-                                    provider_id=f"geoapify_{place_id}" if place_id else None
+                                    provider_id=f"geoapify_{place_id}" if place_id else None,
+                                    has_social_media=has_social,
+                                    has_mobile_app=has_app,
                                 )
                             )
                         except Exception as item_err:
                             logger.debug(f"Skipping malformed Geoapify feature: {item_err}")
                             continue
 
-                    # Prioritize genuine, contactable businesses (verified phone first, especially phone + no website)
+                    # Prioritize genuine businesses missing Website/WebApp, Mobile App, and Digital Marketing with verified phone
                     results.sort(
                         key=lambda b: (
+                            1 if (b.phone and not b.website and not b.has_mobile_app and not b.has_social_media) else 0,
                             1 if (b.phone and not b.website) else 0,
                             1 if b.phone else 0,
                             1 if b.website else 0,

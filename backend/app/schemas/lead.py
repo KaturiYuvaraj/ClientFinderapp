@@ -16,6 +16,8 @@ class NormalizedBusiness(BaseModel):
     source: Optional[str] = "Authorized Business API"
     source_url: Optional[str] = ""
     provider_id: Optional[str] = None
+    has_social_media: Optional[bool] = False
+    has_mobile_app: Optional[bool] = False
 
     @field_validator(
         "name", "category", "phone", "website", "address",

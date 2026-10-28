@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import LeadCard from './LeadCard';
 import { SearchX, Sparkles } from 'lucide-react';
 
@@ -11,6 +11,7 @@ export default function LeadList({
   onGenerateMessage,
   savingLeadId
 }) {
+  const [filterType, setFilterType] = useState('ALL');
   if (isLoading) {
     return (
       <div className="lead-cards-container">
@@ -53,18 +54,74 @@ export default function LeadList({
     );
   }
 
+  const filteredLeads = leads.filter((lead) => {
+    if (filterType === 'MISSING_ALL_3') {
+      return !lead.website && !lead.has_mobile_app && !lead.has_digital_marketing;
+    }
+    if (filterType === 'NO_WEBSITE') return !lead.website;
+    if (filterType === 'NO_MOBILE_APP') return !lead.has_mobile_app;
+    if (filterType === 'NO_MARKETING') return !lead.has_digital_marketing;
+    if (filterType === 'HAS_PHONE') return Boolean(lead.phone);
+    return true;
+  });
+
   return (
     <div className="lead-cards-container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 2px' }}>
         <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-          Discovered Opportunities ({leads.length})
+          Discovered Opportunities ({filteredLeads.length} / {leads.length})
         </span>
         <span style={{ fontSize: '11px', color: 'var(--accent-emerald)', fontWeight: 600 }}>
           Sorted by AI Score
         </span>
       </div>
 
-      {leads.map((lead, idx) => {
+      <div className="preset-pills-row" style={{ marginBottom: 4 }}>
+        <button
+          type="button"
+          className={`preset-pill ${filterType === 'ALL' ? 'active' : ''}`}
+          onClick={() => setFilterType('ALL')}
+        >
+          All ({leads.length})
+        </button>
+        <button
+          type="button"
+          className={`preset-pill ${filterType === 'MISSING_ALL_3' ? 'active' : ''}`}
+          onClick={() => setFilterType('MISSING_ALL_3')}
+        >
+          🔥 Missing All 3 ({leads.filter((l) => !l.website && !l.has_mobile_app && !l.has_digital_marketing).length})
+        </button>
+        <button
+          type="button"
+          className={`preset-pill ${filterType === 'NO_WEBSITE' ? 'active' : ''}`}
+          onClick={() => setFilterType('NO_WEBSITE')}
+        >
+          ❌ No Website/WebApp ({leads.filter((l) => !l.website).length})
+        </button>
+        <button
+          type="button"
+          className={`preset-pill ${filterType === 'NO_MOBILE_APP' ? 'active' : ''}`}
+          onClick={() => setFilterType('NO_MOBILE_APP')}
+        >
+          📵 No Mobile App ({leads.filter((l) => !l.has_mobile_app).length})
+        </button>
+        <button
+          type="button"
+          className={`preset-pill ${filterType === 'NO_MARKETING' ? 'active' : ''}`}
+          onClick={() => setFilterType('NO_MARKETING')}
+        >
+          📉 No Digital Marketing ({leads.filter((l) => !l.has_digital_marketing).length})
+        </button>
+        <button
+          type="button"
+          className={`preset-pill ${filterType === 'HAS_PHONE' ? 'active' : ''}`}
+          onClick={() => setFilterType('HAS_PHONE')}
+        >
+          📞 Has Phone ({leads.filter((l) => Boolean(l.phone)).length})
+        </button>
+      </div>
+
+      {filteredLeads.map((lead, idx) => {
         const leadKey = lead.provider_id || lead.id || lead.name || lead.business_name;
         return (
           <LeadCard

@@ -5,12 +5,12 @@ import {
 } from 'lucide-react';
 
 const COMMON_SERVICES = [
-  { id: 'Website Development', label: '🌐 Website Dev' },
+  { id: 'Website / Web App, Mobile Application, Digital Marketing', label: '🔥 Full Digital Suite' },
+  { id: 'Website Development', label: '🌐 Website / Web App' },
   { id: 'Mobile Application', label: '📱 Mobile App' },
-  { id: 'Logo / Branding', label: '🎨 Branding' },
-  { id: 'Video Editing', label: '🎬 Video Editing' },
-  { id: 'SEO & Digital Marketing', label: '🔍 SEO Marketing' },
+  { id: 'SEO & Digital Marketing', label: '📈 Digital Marketing' },
   { id: 'Social Media Management', label: '📱 Social Media' },
+  { id: 'Logo / Branding', label: '🎨 Branding' },
 ];
 
 const COMMON_CATEGORIES = [

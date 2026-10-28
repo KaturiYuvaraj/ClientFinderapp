@@ -19,6 +19,10 @@ class DiscoveredLeadItem(NormalizedBusiness):
     verified_facts: List[str] = []
     inferences: List[str] = []
     suggested_approach: Optional[str] = None
+    has_website: bool = False
+    has_mobile_app: bool = False
+    has_digital_marketing: bool = False
+    missing_services: List[str] = []
     is_saved: bool = False
     saved_lead_id: Optional[int] = None
 

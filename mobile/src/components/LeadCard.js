@@ -223,9 +223,25 @@ export default function LeadCard({ lead, saved, onSave, onDelete, onStatusChange
               >
                 <Ionicons name={hasWebsite ? "globe" : "globe-outline"} size={10} color={hasWebsite ? colors.purple : colors.amber} />
                 <Text style={[sc.presenceText, { color: hasWebsite ? colors.purple : colors.amber }]} numberOfLines={1}>
-                  {hasWebsite ? `Website: Exists (${currentLead.website.replace(/^https?:\/\/(www\.)?/, '').slice(0, 26)})` : "Website: None (High Opportunity!)"}
+                  {hasWebsite ? `Website/WebApp: ${currentLead.website.replace(/^https?:\/\/(www\.)?/, '').slice(0, 24)}` : "Website / Web App: None (Opportunity!)"}
                 </Text>
               </TouchableOpacity>
+
+              {/* Mobile App & Digital Marketing Gap Badges */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                {!currentLead.has_mobile_app && (
+                  <View style={[sc.presenceBadge, sc.presenceNoneWeb]}>
+                    <Ionicons name="phone-portrait-outline" size={10} color={colors.amber} />
+                    <Text style={[sc.presenceText, { color: colors.amber }]}>No Mobile App</Text>
+                  </View>
+                )}
+                {!currentLead.has_digital_marketing && (
+                  <View style={[sc.presenceBadge, sc.presenceNoneWeb]}>
+                    <Ionicons name="trending-down-outline" size={10} color={colors.amber} />
+                    <Text style={[sc.presenceText, { color: colors.amber }]}>No Digital Marketing</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </View>
           <ScoreBadge score={currentLead.opportunity_score ?? currentLead.lead_score ?? currentLead.score ?? 0} />

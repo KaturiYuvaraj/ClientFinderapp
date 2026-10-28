@@ -69,6 +69,10 @@ class AIService:
         service_clean = service.strip().lower()
         has_website = bool(business.website and len(business.website.strip()) > 3)
         has_phone = bool(business.phone and len(business.phone.strip()) > 5)
+        has_mobile_app = bool(getattr(business, "has_mobile_app", False))
+        has_digital_marketing = bool(
+            getattr(business, "has_social_media", False) or (has_website and (business.review_count or 0) >= 40)
+        )
         rating = business.rating or 0.0
         review_count = business.review_count or 0
         cat = (business.category or "business").title()
@@ -81,11 +85,19 @@ class AIService:
         confidence = "Moderate"
         suggested_approach = ""
 
-        # Gather verified facts
+        # Gather verified facts on Website/WebApp, Mobile App, Digital Marketing, and Phone
         if has_website:
             verified_facts.append(f"Business has an active website listed: {business.website}")
         else:
-            verified_facts.append("No website URL was returned by the business-data provider")
+            verified_facts.append("Missing Website / Web App: No official website or web app found in public records")
+
+        if not has_mobile_app:
+            verified_facts.append("Missing Mobile Application: No dedicated iOS or Android mobile app detected")
+
+        if not has_digital_marketing:
+            verified_facts.append("Missing Digital Marketing: No active social media funnel or SEO presence linked")
+        else:
+            verified_facts.append("Social media or digital marketing footprint detected")
 
         if has_phone:
             verified_facts.append(f"Public contact number available ({business.phone})")
@@ -98,6 +110,9 @@ class AIService:
             verified_facts.append("No public customer reviews recorded")
 
         verified_facts.append(f"Categorized as {cat} in {business.city or 'target area'}")
+
+        # Boost score to 95 when business has a verified phone and lacks all 3: Website/WebApp, Mobile App, and Digital Marketing
+        missing_all_three = (not has_website) and (not has_mobile_app) and (not has_digital_marketing)
 
         # Opportunity Logic per service
         if any(w in service_clean for w in ["web", "site", "landing", "software"]):
@@ -231,6 +246,14 @@ class AIService:
                 inferences.append(f"Multi-service synergy: Combining {service} delivers faster customer acquisition and higher retention.")
             inferences.append(f"Business could leverage professional {service} to expand operations and market share.")
             suggested_approach = "Present a comprehensive multi-service proposal addressing web presence, customer acquisition, and retention."
+
+        if missing_all_three and has_phone:
+            score = max(score, 95)
+            confidence = "Very High"
+            reason = (
+                f"High-priority {cat} lead with a verified phone number ({business.phone}) that currently has "
+                "NO Website/Web App, NO Mobile Application, and NO Digital Marketing presence."
+            )
 
         return AIOpportunityAnalysis(
             service_match=True,

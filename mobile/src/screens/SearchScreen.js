@@ -16,7 +16,8 @@ const CATEGORIES = [
 ];
 
 const SERVICES = [
-  'Website Design', 'Mobile Application', 'SEO Services', 'Social Media Management',
+  'Website / Web App', 'Mobile Application', 'Digital Marketing',
+  'Website Design', 'SEO Services', 'Social Media Management',
   'Google Ads', 'Logo & Branding', 'E-commerce Store',
   'WhatsApp Chatbot', 'CRM Setup', 'Content Marketing',
   'Video Production', 'Email Marketing', 'Cybersecurity', 'Cloud Setup',
@@ -46,12 +47,16 @@ const LOCATION_EXAMPLES = [
 export default function SearchScreen({ onShowToast }) {
   const [location, setLocation] = useState('');
   const [category, setCategory] = useState('');
-  const [selectedServices, setSelectedServices] = useState(['Website Design']);
+  const [selectedServices, setSelectedServices] = useState([
+    'Website / Web App',
+    'Mobile Application',
+    'Digital Marketing',
+  ]);
   const [keywords, setKeywords] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [searched, setSearched] = useState(false);
-  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'NO_WEBSITE' | 'HAS_PHONE'
+  const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'MISSING_ALL_3' | 'NO_WEBSITE' | 'NO_MOBILE_APP' | 'NO_MARKETING' | 'HAS_PHONE'
 
   const toggleService = (sv) => {
     setSelectedServices((prev) => {
@@ -308,11 +313,38 @@ export default function SearchScreen({ onShowToast }) {
               </TouchableOpacity>
 
               <TouchableOpacity
+                style={[s.filterChip, filterType === 'MISSING_ALL_3' && s.filterChipActiveAmber]}
+                onPress={() => setFilterType('MISSING_ALL_3')}
+              >
+                <Text style={[s.filterChipText, filterType === 'MISSING_ALL_3' && { color: colors.amber, fontWeight: '700' }]}>
+                  🔥 Missing All 3 ({results.filter((r) => !r.website && !r.has_mobile_app && !r.has_digital_marketing).length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[s.filterChip, filterType === 'NO_WEBSITE' && s.filterChipActiveAmber]}
                 onPress={() => setFilterType('NO_WEBSITE')}
               >
                 <Text style={[s.filterChipText, filterType === 'NO_WEBSITE' && { color: colors.amber, fontWeight: '700' }]}>
-                  ❌ No Website ({results.filter((r) => !r.website).length})
+                  ❌ No Website/WebApp ({results.filter((r) => !r.website).length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.filterChip, filterType === 'NO_MOBILE_APP' && s.filterChipActiveAmber]}
+                onPress={() => setFilterType('NO_MOBILE_APP')}
+              >
+                <Text style={[s.filterChipText, filterType === 'NO_MOBILE_APP' && { color: colors.amber, fontWeight: '700' }]}>
+                  📵 No Mobile App ({results.filter((r) => !r.has_mobile_app).length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.filterChip, filterType === 'NO_MARKETING' && s.filterChipActiveAmber]}
+                onPress={() => setFilterType('NO_MARKETING')}
+              >
+                <Text style={[s.filterChipText, filterType === 'NO_MARKETING' && { color: colors.amber, fontWeight: '700' }]}>
+                  📉 No Digital Marketing ({results.filter((r) => !r.has_digital_marketing).length})
                 </Text>
               </TouchableOpacity>
 
@@ -331,7 +363,12 @@ export default function SearchScreen({ onShowToast }) {
 
       {results
         .filter((lead) => {
+          if (filterType === 'MISSING_ALL_3') {
+            return !lead.website && !lead.has_mobile_app && !lead.has_digital_marketing;
+          }
           if (filterType === 'NO_WEBSITE') return !lead.website;
+          if (filterType === 'NO_MOBILE_APP') return !lead.has_mobile_app;
+          if (filterType === 'NO_MARKETING') return !lead.has_digital_marketing;
           if (filterType === 'HAS_PHONE') return !!lead.phone;
           return true;
         })

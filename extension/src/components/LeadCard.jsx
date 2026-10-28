@@ -89,9 +89,23 @@ export default function LeadCard({
             <span>{lead.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').slice(0, 24)}</span>
           </a>
         ) : (
-          <span className="chip chip-website-none" title="High opportunity: Business has no web presence">
+          <span className="chip chip-website-none" title="High opportunity: Business has no Website or Web App">
             <AlertTriangle size={11} />
-            <span>No Website Listed (Opportunity)</span>
+            <span>No Website / Web App</span>
+          </span>
+        )}
+
+        {!lead.has_mobile_app && (
+          <span className="chip chip-website-none" title="High opportunity: Business has no Mobile Application">
+            <AlertTriangle size={11} />
+            <span>No Mobile App</span>
+          </span>
+        )}
+
+        {!lead.has_digital_marketing && (
+          <span className="chip chip-website-none" title="High opportunity: Business has no Digital Marketing presence">
+            <AlertTriangle size={11} />
+            <span>No Digital Marketing</span>
           </span>
         )}
       </div>
