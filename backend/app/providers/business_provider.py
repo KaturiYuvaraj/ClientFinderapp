@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
+from urllib.parse import urlparse
 import logging
 import httpx
 import re
@@ -58,9 +59,33 @@ SOCIAL_ONLY_DOMAINS = (
 
 AGGREGATOR_ONLY_DOMAINS = (
     "zomato.com", "swiggy.com", "ubereats.com", "doordash.com", "grubhub.com",
-    "seamless.com", "deliveroo.", "just-eat.", "yelp.com", "tripadvisor.",
-    "justdial.com", "magicpin.in", "eazyDiner.", "opentable.com", "resy.com",
+    "seamless.com", "deliveroo.co.uk", "deliveroo.com", "just-eat.co.uk",
+    "just-eat.com", "yelp.com", "tripadvisor.com", "tripadvisor.in",
+    "justdial.com", "magicpin.in", "eazydiner.com", "opentable.com",
+    "resy.com", "business.site",
 )
+
+
+def _domain_matches(url_or_host: str, domain_list: tuple) -> bool:
+    """
+    Checks if a URL or hostname matches any domain in domain_list on exact
+    domain boundaries (so 'x.com' never false-matches 'unikwax.com').
+    """
+    try:
+        parsed = urlparse(url_or_host if "://" in url_or_host else f"https://{url_or_host}")
+        host = (parsed.netloc or parsed.path.split("/")[0]).lower().split(":")[0]
+    except Exception:
+        return False
+
+    for prefix in ("www.", "m.", "mobile."):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+
+    for d in domain_list:
+        d_clean = d.lower().strip(".")
+        if host == d_clean or host.endswith("." + d_clean):
+            return True
+    return False
 
 
 def _is_corporate_chain(name: str, raw_tags: dict) -> bool:
@@ -97,11 +122,11 @@ def _classify_digital_presence(raw_website: str, raw_tags: dict) -> tuple:
         if not w_clean.startswith(("http://", "https://")) and "." in w_clean and not w_clean.startswith("@"):
             w_clean = f"https://{w_clean}"
         w_low = w_clean.lower()
-        if "play.google.com" in w_low or "apps.apple.com" in w_low:
+        if _domain_matches(w_low, ("play.google.com", "apps.apple.com")):
             has_app = True
-        elif any(soc in w_low for soc in SOCIAL_ONLY_DOMAINS):
+        elif _domain_matches(w_low, SOCIAL_ONLY_DOMAINS):
             has_social = True
-        elif any(agg in w_low for agg in AGGREGATOR_ONLY_DOMAINS):
+        elif _domain_matches(w_low, AGGREGATOR_ONLY_DOMAINS):
             pass
         elif w_clean.startswith(("http://", "https://")):
             official_website = w_clean
@@ -919,6 +944,30 @@ class GeoapifyProvider(BusinessDataProvider):
                         except Exception as item_err:
                             logger.debug(f"Skipping malformed Geoapify feature: {item_err}")
                             continue
+
+                    # Propagate known brand websites/social/apps across multiple branches of the same business name
+                    brand_websites = {}
+                    brand_social = set()
+                    brand_apps = set()
+                    for biz in results:
+                        norm_name = re.sub(r"[^a-z0-9]", "", biz.name.lower())
+                        if not norm_name:
+                            continue
+                        if biz.website and norm_name not in brand_websites:
+                            brand_websites[norm_name] = biz.website
+                        if biz.has_social_media:
+                            brand_social.add(norm_name)
+                        if biz.has_mobile_app:
+                            brand_apps.add(norm_name)
+
+                    for biz in results:
+                        norm_name = re.sub(r"[^a-z0-9]", "", biz.name.lower())
+                        if norm_name in brand_websites and not biz.website:
+                            biz.website = brand_websites[norm_name]
+                        if norm_name in brand_social:
+                            biz.has_social_media = True
+                        if norm_name in brand_apps:
+                            biz.has_mobile_app = True
 
                     # Prioritize genuine businesses missing Website/WebApp, Mobile App, and Digital Marketing with verified phone
                     results.sort(

@@ -48,7 +48,7 @@ DIRECTORY_DOMAINS = {
     # Booking, Salon & Appointments Platforms
     'fresha.', 'vagaro.', 'booksy.', 'schedulicity.', 'setmore.', 'styleseat.',
     'mindbodyonline.', 'appointy.', 'zipappointments.', 'treatwell.', 'resy.com',
-    'thefork.', 'booker.com', 'acuityscheduling.', 'calendly.',
+    'thefork.', 'booker.com', 'acuityscheduling.', 'calendly.', 'business.site',
 }
 
 DIRECTORY_PATH_PATTERNS = [
@@ -105,8 +105,22 @@ def extract_phone_from_text(text: str) -> str:
     return ""
 
 def is_directory(domain: str) -> bool:
-    d = domain.lower()
-    return any(dir_tag in d for dir_tag in DIRECTORY_DOMAINS)
+    host = domain.lower().strip().split(":")[0]
+    for prefix in ("www.", "m.", "mobile."):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+    if host.endswith(".gov"):
+        return True
+    for dir_tag in DIRECTORY_DOMAINS:
+        if dir_tag == "gov":
+            continue
+        if dir_tag.endswith("."):
+            if host.startswith(dir_tag) or ("." + dir_tag) in host:
+                return True
+        else:
+            if host == dir_tag or host.endswith("." + dir_tag):
+                return True
+    return False
 
 def token_matches_domain(token: str, domain_clean: str) -> bool:
     """Matches a word token against domain, tolerating singular/plural and common stems."""
@@ -255,30 +269,27 @@ class AutoContactEnricher:
 
         # If current_website is actually a directory or aggregator, invalidate it
         if website:
-            parsed_curr = urlparse(website)
-            if is_directory(parsed_curr.netloc) or not is_official_website(website, name, location):
+            parsed_curr = urlparse(website if "://" in website else f"https://{website}")
+            if is_directory(parsed_curr.netloc):
                 website = ""
 
         # If we already have both valid phone and verified website, no enrichment needed
         if phone and website:
             return phone, website
 
-        # Build address-aware query for maximum accuracy (avoid duplicating business name)
-        clean_addr = ""
-        if address:
-            parts = [p.strip() for p in address.split(",") if p.strip()]
-            if parts and parts[0].lower().strip() == name.lower().strip():
-                parts = parts[1:]
-            clean_addr = " ".join(parts[:2])
-
+        # Build concise, high-recall query (business name + city) so search engine returns official site
+        city_short = location.split(",")[0].strip() if location else ""
         search_terms = [name]
-        if clean_addr:
-            search_terms.append(clean_addr)
-        if location and location.lower() not in clean_addr.lower():
-            search_terms.append(location)
-        if category:
-            search_terms.append(category)
-        search_terms.append("phone")
+        if city_short:
+            search_terms.append(city_short)
+        elif address:
+            parts = [p.strip() for p in address.split(",") if p.strip() and p.strip().lower() != name.lower().strip()]
+            if parts:
+                search_terms.append(parts[0])
+        if not website:
+            search_terms.append("official website")
+        elif not phone:
+            search_terms.append("phone")
 
         raw_query = " ".join(search_terms)
         query = re.sub(r'[\'\"\(\)]', '', raw_query).strip()
@@ -297,7 +308,7 @@ class AutoContactEnricher:
                     # Check if this URL is an authentic official website
                     if not website:
                         title_str = r.get("title", "")
-                        if is_official_website(href, name, location or clean_addr, snippet_title=title_str):
+                        if is_official_website(href, name, location or city_short, snippet_title=title_str):
                             parsed = urlparse(href)
                             # Custom domain: keep scheme + netloc homepage
                             if parsed.netloc.count('.') <= 2 and not any(p in parsed.netloc for p in ['wixsite', 'squarespace', 'wordpress']):
