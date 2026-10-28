@@ -103,39 +103,39 @@ class AIService:
         if any(w in service_clean for w in ["web", "site", "landing", "software"]):
             opportunity_type = "Website Development & Modernization"
             if not has_website:
-                if review_count > 50 or rating >= 4.0:
-                    score = 92
+                if has_phone and (review_count > 50 or rating >= 4.0):
+                    score = 94
                     confidence = "Very High"
-                    reason = "Popular establishment with active customer demand and public phone, but completely missing an official website."
+                    reason = "Popular establishment with active customer demand and verified phone number, but completely missing an official website."
                     inferences.append("High footfall and review volume indicate strong business viability and ability to invest in a web presence.")
                     inferences.append("Losing potential online orders, reservations, and direct search traffic to competitors with websites.")
                     suggested_approach = "Present a clean mobile-friendly restaurant/business demo showcasing online menu, opening hours, and direct booking/inquiry."
                 elif has_phone:
-                    score = 88
+                    score = 90
                     confidence = "High"
-                    reason = "Listing has verified phone contact and local presence, but no website exists in public records."
+                    reason = "Genuine local business with a verified phone number, but no official website exists in public records."
                     inferences.append("Customers searching via mobile web cannot view service catalog or operating details.")
-                    suggested_approach = "Reach out via phone or in-person visit with an easy-to-manage modern starter website proposal."
+                    suggested_approach = "Call or WhatsApp directly with an easy-to-manage modern starter website proposal."
                 else:
-                    score = 70
+                    score = 54
                     confidence = "Moderate"
-                    reason = "No website found, though contact details are limited."
+                    reason = "No website found, though public phone contact details are not listed."
                     inferences.append("May need verification of primary decision maker contact channel.")
-                    suggested_approach = "Send an introductory postal note or visit business address directly."
+                    suggested_approach = "Visit business address directly or connect via local social directories."
             else:
                 # Business has a website
                 if "http://" in business.website:
-                    score = 65
-                    confidence = "Moderate"
-                    reason = "Website detected, but appears to use unencrypted HTTP protocol."
-                    inferences.append("Likely an outdated website that would benefit from HTTPS security and a modern responsive redesign.")
+                    score = 72 if has_phone else 55
+                    confidence = "High" if has_phone else "Moderate"
+                    reason = "Website detected, but uses unencrypted HTTP protocol."
+                    inferences.append("Outdated website that would benefit from HTTPS security and a modern responsive redesign.")
                     suggested_approach = "Offer a complimentary website audit highlighting security, speed, and mobile responsiveness."
                 else:
-                    score = 35
-                    confidence = "Low"
-                    reason = "Business already operates an active website."
-                    inferences.append("Opportunity limited to redesigns, SEO optimization, or custom feature expansion.")
-                    suggested_approach = "Pitch performance audits, conversion rate optimization, or web application add-ons."
+                    score = 62 if has_phone else 35
+                    confidence = "Moderate" if has_phone else "Low"
+                    reason = "Business operates an active website and has verified phone contact for expansion services." if has_phone else "Business already operates an active website."
+                    inferences.append("Opportunity focused on website redesign, custom mobile app, SEO optimization, or conversion upgrades.")
+                    suggested_approach = "Pitch performance audits, conversion rate optimization, or companion mobile application add-ons."
 
         elif any(w in service_clean for w in ["app", "mobile", "ios", "android", "application"]):
             opportunity_type = "Mobile Application Development"

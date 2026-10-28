@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # 'smart' = automatic Yelp → Foursquare → OSM fallback chain
     BUSINESS_API_PROVIDER: str = "smart"
     BUSINESS_API_KEY: Optional[str] = None   # Google Places API key (optional — best worldwide data)
+    SERPER_API_KEY: Optional[str] = None     # Serper.dev Google Maps API key — 2,500 free searches at serper.dev (no credit card)
     GEOAPIFY_API_KEY: Optional[str] = None   # Geoapify API key — free 3,000/day at geoapify.com (no credit card)
     YELP_API_KEY: Optional[str] = None        # Yelp Fusion API key (optional)
     FOURSQUARE_API_KEY: Optional[str] = None  # Foursquare API key (deprecated)

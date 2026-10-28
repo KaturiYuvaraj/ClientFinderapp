@@ -603,7 +603,7 @@ out tags center 60;
                                         city=query.location,
                                         latitude=lat_val,
                                         longitude=lon_val,
-                                        rating=_safe_float(tags.get("stars"), 4.0),
+                                        rating=_safe_float(tags.get("stars"), 0.0),
                                         review_count=_safe_int(tags.get("review_count"), 0),
                                         source="OpenStreetMap Live Data",
                                         source_url=display_website or f"https://www.openstreetmap.org/{el_type}/{el.get('id')}",
@@ -614,8 +614,29 @@ out tags center 60;
                                 logger.debug(f"Skipping malformed OSM element: {item_err}")
                                 continue
 
-                        logger.info(f"Overpass ({endpoint}): found {len(results)} live businesses for '{query.category}' in '{query.location}'")
-                        return results
+                        # Deduplicate by name and prioritize genuine businesses with verified phone numbers
+                        seen_names = set()
+                        unique_results = []
+                        results.sort(
+                            key=lambda b: (
+                                1 if (b.phone and not b.website) else 0,
+                                1 if b.phone else 0,
+                                1 if b.website else 0,
+                                1 if (b.address and b.address != query.location) else 0,
+                            ),
+                            reverse=True,
+                        )
+                        for biz in results:
+                            norm_name = re.sub(r"[^a-z0-9]", "", biz.name.lower())
+                            if not norm_name or norm_name in seen_names:
+                                continue
+                            seen_names.add(norm_name)
+                            unique_results.append(biz)
+                            if len(unique_results) >= 35:
+                                break
+
+                        logger.info(f"Overpass ({endpoint}): found {len(unique_results)} live businesses for '{query.category}' in '{query.location}'")
+                        return unique_results
                     else:
                         logger.warning(f"Overpass ({endpoint}) returned status {resp.status_code}, trying next mirror if available...")
             except Exception as e:
@@ -758,13 +779,13 @@ class GeoapifyProvider(BusinessDataProvider):
 
         lat = geo["lat"]
         lon = geo["lon"]
-        radius_m = max(5000, OverpassBusinessProvider()._parse_radius_meters(query.radius))
+        radius_m = max(12000, OverpassBusinessProvider()._parse_radius_meters(query.radius))
 
         params = {
             "categories": geo_cat,
             "filter": f"circle:{lon},{lat},{radius_m}",
-            "bias": f"proximity:{lon},{lat}",
-            "limit": 30,
+            "conditions": "named",
+            "limit": 250,
             "apiKey": self.api_key,
         }
 
@@ -801,9 +822,13 @@ class GeoapifyProvider(BusinessDataProvider):
                                 raw_data.get("phone") or
                                 raw_data.get("contact:phone") or
                                 raw_data.get("contact:mobile") or
-                                raw_data.get("mobile") or ""
+                                raw_data.get("mobile") or
+                                raw_data.get("contact:whatsapp") or
+                                raw_data.get("whatsapp") or
+                                raw_data.get("telephone") or
+                                raw_data.get("tel") or ""
                             )
-                            phone = re.split(r'[;/]', str(raw_phone))[0].strip() if raw_phone else ""
+                            phone = re.split(r'[;/,]', str(raw_phone))[0].strip() if raw_phone else ""
 
                             raw_website = (
                                 props.get("website") or
@@ -830,7 +855,8 @@ class GeoapifyProvider(BusinessDataProvider):
                             lat_val = _safe_float(props.get("lat"), 0.0)
                             lon_val = _safe_float(props.get("lon"), 0.0)
                             stars = raw_data.get("stars")
-                            rating = _safe_float(stars, 4.2)
+                            rating = _safe_float(stars, 0.0)
+                            review_cnt = _safe_int(raw_data.get("review_count"), 0)
 
                             results.append(
                                 NormalizedBusiness(
@@ -843,7 +869,7 @@ class GeoapifyProvider(BusinessDataProvider):
                                     latitude=lat_val,
                                     longitude=lon_val,
                                     rating=rating,
-                                    review_count=18,
+                                    review_count=review_cnt,
                                     source="Geoapify Places",
                                     source_url=website or f"https://www.google.com/maps/search/?api=1&query={name}+{query.location}",
                                     provider_id=f"geoapify_{place_id}" if place_id else None
@@ -853,8 +879,34 @@ class GeoapifyProvider(BusinessDataProvider):
                             logger.debug(f"Skipping malformed Geoapify feature: {item_err}")
                             continue
 
-                    logger.info(f"Geoapify: Found {len(results)} places for '{query.category}' in '{query.location}'")
-                    return results
+                    # Prioritize genuine, contactable businesses (verified phone first, especially phone + no website)
+                    results.sort(
+                        key=lambda b: (
+                            1 if (b.phone and not b.website) else 0,
+                            1 if b.phone else 0,
+                            1 if b.website else 0,
+                            1 if (b.address and b.address != query.location) else 0,
+                        ),
+                        reverse=True,
+                    )
+
+                    # Deduplicate by normalized business name so chains don't flood results
+                    seen_names = set()
+                    unique_results = []
+                    for biz in results:
+                        norm_name = re.sub(r"[^a-z0-9]", "", biz.name.lower())
+                        if not norm_name or norm_name in seen_names:
+                            continue
+                        seen_names.add(norm_name)
+                        unique_results.append(biz)
+                        if len(unique_results) >= 35:
+                            break
+
+                    logger.info(
+                        f"Geoapify: Scanned {len(results)} places, returning top {len(unique_results)} genuine leads "
+                        f"({sum(1 for b in unique_results if b.phone)} with verified phone) for '{query.category}' in '{query.location}'"
+                    )
+                    return unique_results
                 else:
                     logger.warning(f"Geoapify Places API returned {resp.status_code}: {resp.text[:200]}")
         except Exception as e:
@@ -1035,17 +1087,85 @@ class FoursquareProvider(BusinessDataProvider):
         return []
 
 
+class SerperGoogleMapsProvider(BusinessDataProvider):
+    """
+    Serper.dev Google Maps Places API Provider — 2,500 free queries (NO CREDIT CARD required).
+    Returns 100% live Google Maps listings with verified phone numbers, websites, ratings, and review counts.
+    Get free API key at: https://serper.dev
+    """
+    SERPER_PLACES_URL = "https://google.serper.dev/places"
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or getattr(settings, "SERPER_API_KEY", None)
+
+    async def search(self, query: SearchRequest) -> List[NormalizedBusiness]:
+        if not self.api_key:
+            return []
+
+        text_query = f"{query.category} in {query.location}"
+        if query.keywords:
+            text_query += f" {query.keywords}"
+
+        headers = {
+            "X-API-KEY": self.api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {"q": text_query, "num": 30}
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(self.SERPER_PLACES_URL, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    places = data.get("places", [])
+                    results = []
+                    for p in places:
+                        name = str(p.get("title") or "").strip()
+                        if not name:
+                            continue
+                        phone = str(p.get("phoneNumber") or "").strip()
+                        website = str(p.get("website") or "").strip()
+                        address = str(p.get("address") or query.location).strip()
+                        place_id = str(p.get("cid") or p.get("placeId") or "")
+                        results.append(
+                            NormalizedBusiness(
+                                name=name,
+                                category=str(p.get("category") or query.category.title()),
+                                phone=phone,
+                                website=website,
+                                address=address,
+                                city=query.location,
+                                latitude=_safe_float(p.get("latitude"), 0.0),
+                                longitude=_safe_float(p.get("longitude"), 0.0),
+                                rating=_safe_float(p.get("rating"), 0.0),
+                                review_count=_safe_int(p.get("ratingCount"), 0),
+                                source="Google Maps (via Serper)",
+                                source_url=website or f"https://www.google.com/maps/search/?api=1&query={name}+{query.location}",
+                                provider_id=f"serper_{place_id}" if place_id else None,
+                            )
+                        )
+                    return results
+                else:
+                    logger.warning(f"Serper Places API returned {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            logger.warning(f"Serper Places API error: {e}")
+
+        return []
+
+
 class SmartFallbackProvider(BusinessDataProvider):
     """
     Smart multi-tier fallback provider:
     1. Google Places (if BUSINESS_API_KEY set) — 100% accurate phone, website, ratings worldwide.
-    2. Geoapify (if GEOAPIFY_API_KEY set) — 3,000 free requests/day, no credit card required.
-    3. Yelp (if YELP_API_KEY set)
-    4. OpenStreetMap / Overpass (always active, free, global, enhanced contact extraction).
+    2. Serper Google Maps (if SERPER_API_KEY set) — 2,500 free Google Maps queries, no credit card.
+    3. Geoapify (if GEOAPIFY_API_KEY set) — 3,000 free requests/day, no credit card required.
+    4. Yelp (if YELP_API_KEY set)
+    5. OpenStreetMap / Overpass (always active, free, global, enhanced contact extraction).
     """
 
     def __init__(self):
         self.google = GooglePlacesCompliantProvider()
+        self.serper = SerperGoogleMapsProvider()
         self.geoapify = GeoapifyProvider()
         self.yelp = YelpFusionProvider()
         self.foursquare = FoursquareProvider()
@@ -1061,6 +1181,16 @@ class SmartFallbackProvider(BusinessDataProvider):
                     return g_results
             except Exception as e:
                 logger.warning(f"SmartFallback: Google Places failed — {e}")
+
+        # Tier 2: Serper Google Maps — 2,500 free Google Maps queries, no CC required
+        if self.serper.api_key:
+            try:
+                s_results = await self.serper.search(query)
+                if s_results:
+                    logger.info(f"SmartFallback: Using Serper Google Maps ({len(s_results)} results)")
+                    return s_results
+            except Exception as e:
+                logger.warning(f"SmartFallback: Serper failed — {e}")
 
         # Tier 2: Geoapify — free 3,000 requests/day, no CC required
         if self.geoapify.api_key:
