@@ -375,7 +375,7 @@ class AutoContactEnricher:
             return businesses
 
         target_items = needy[:max_enrich]
-        sem = asyncio.Semaphore(5)  # Concurrency limit
+        sem = asyncio.Semaphore(2)  # Keep DDGS concurrency low to prevent rate-limiting
 
         async def _enrich_item(biz: NormalizedBusiness):
             async with sem:
@@ -390,7 +390,7 @@ class AutoContactEnricher:
                             current_phone=biz.phone,
                             current_website=biz.website
                         ),
-                        timeout=3.5
+                        timeout=4.0
                     )
                     if new_phone:
                         biz.phone = new_phone
@@ -402,7 +402,7 @@ class AutoContactEnricher:
         try:
             await asyncio.wait_for(
                 asyncio.gather(*[_enrich_item(b) for b in target_items], return_exceptions=True),
-                timeout=8.0
+                timeout=9.5
             )
             logger.info(f"AutoContactEnricher: Processed {len(target_items)} leads for missing contact details.")
         except asyncio.TimeoutError:
