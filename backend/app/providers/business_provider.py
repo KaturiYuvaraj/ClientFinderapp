@@ -307,24 +307,41 @@ class OverpassBusinessProvider(BusinessDataProvider):
         "johannesburg": {"lat": -26.2041, "lon": 28.0473},
         "nairobi": {"lat": -1.2921, "lon": 36.8219},
         "cairo": {"lat": 30.0444, "lon": 31.2357},
+        # Country-level fallbacks (maps broad country searches to prime commercial hubs)
+        "india": {"lat": 19.0760, "lon": 72.8777},
+        "usa": {"lat": 40.7128, "lon": -74.0060},
+        "united states": {"lat": 40.7128, "lon": -74.0060},
+        "uk": {"lat": 51.5074, "lon": -0.1278},
+        "united kingdom": {"lat": 51.5074, "lon": -0.1278},
+        "canada": {"lat": 43.6532, "lon": -79.3832},
+        "australia": {"lat": -33.8688, "lon": 151.2093},
+        "uae": {"lat": 25.2048, "lon": 55.2708},
+        "germany": {"lat": 52.5200, "lon": 13.4050},
+        "france": {"lat": 48.8566, "lon": 2.3522},
+        "japan": {"lat": 35.6762, "lon": 139.6503},
+        "brazil": {"lat": -23.5505, "lon": -46.6333},
+        "south africa": {"lat": -33.9249, "lon": 18.4241},
+        "spain": {"lat": 40.4168, "lon": -3.7038},
+        "italy": {"lat": 41.9028, "lon": 12.4964},
+        "netherlands": {"lat": 52.3676, "lon": 4.9041},
     }
 
     def _parse_radius_meters(self, radius_str: Optional[str]) -> int:
         """Parse human radius string (e.g. '5 km', '5 miles') to meters with safe bounds"""
         if not radius_str:
-            return 5000
+            return 4000
         try:
             nums = re.findall(r"\d+", str(radius_str))
             if nums:
                 val = int(nums[0])
                 if "mile" in radius_str.lower():
                     val = int(val * 1609.34)
-                else:
+                elif val <= 100:
                     val = val * 1000
-                return max(2000, min(val, 10000))
+                return max(2000, min(val, 5000))
         except Exception:
             pass
-        return 5000
+        return 4000
 
     async def _geocode_city(self, city: str) -> Optional[dict]:
         """
@@ -408,19 +425,18 @@ class OverpassBusinessProvider(BusinessDataProvider):
         bbox = geo.get("bbox") if geo else None
         radius_m = self._parse_radius_meters(query.radius)
 
-        # Build fast, targeted Overpass query searching nodes, ways (buildings), and relations
+        # Build fast, targeted Overpass query searching nodes and ways
         if lat and lon and lat != 0.0 and lon != 0.0:
             tag_unions = "".join([
                 f'  node[{tag}](around:{radius_m},{lat},{lon});\n'
                 f'  way[{tag}](around:{radius_m},{lat},{lon});\n'
-                f'  relation[{tag}](around:{radius_m},{lat},{lon});\n'
                 for tag in osm_tags
             ])
             overpass_query = f"""\
-[out:json][timeout:30];
+[out:json][timeout:12];
 (
 {tag_unions});
-out tags center 100;
+out tags center 60;
 """
             logger.info(f"Overpass radius search around ({lat}, {lon}) with radius={radius_m}m")
         elif bbox and len(bbox) == 4:
@@ -428,29 +444,27 @@ out tags center 100;
             tag_unions = "".join([
                 f'  node[{tag}]({south},{west},{north},{east});\n'
                 f'  way[{tag}]({south},{west},{north},{east});\n'
-                f'  relation[{tag}]({south},{west},{north},{east});\n'
                 for tag in osm_tags
             ])
             overpass_query = f"""\
-[out:json][timeout:30];
+[out:json][timeout:12];
 (
 {tag_unions});
-out tags center 100;
+out tags center 60;
 """
             logger.info(f"Overpass bounding box search: {bbox}")
         else:
             tag_unions = "".join([
                 f'  node[{tag}](area.cityArea);\n'
                 f'  way[{tag}](area.cityArea);\n'
-                f'  relation[{tag}](area.cityArea);\n'
                 for tag in osm_tags
             ])
             overpass_query = f"""\
-[out:json][timeout:30];
+[out:json][timeout:12];
 area[name="{query.location}"]["boundary"="administrative"]->.cityArea;
 (
 {tag_unions});
-out tags center 100;
+out tags center 60;
 """
             logger.info(f"Overpass named area search for '{query.location}'")
 
@@ -461,7 +475,7 @@ out tags center 100;
 
         for endpoint in self.OVERPASS_URLS:
             try:
-                async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+                async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
                     resp = await client.post(endpoint, data={"data": overpass_query})
                     if resp.status_code == 200:
                         data = resp.json()
@@ -469,128 +483,136 @@ out tags center 100;
                         results = []
 
                         for el in elements:
-                            tags = el.get("tags", {})
-                            name = tags.get("name") or tags.get("name:en")
-                            if not name:
-                                continue
+                            try:
+                                tags = el.get("tags", {})
+                                raw_name = tags.get("name") or tags.get("name:en")
+                                if not raw_name:
+                                    continue
+                                name = str(raw_name).strip()
 
-                            # Nodes have lat/lon directly; ways & relations have 'center' dict
-                            el_type = el.get("type", "node")
-                            if el_type in ("way", "relation"):
-                                center = el.get("center", {})
-                                lat_val = center.get("lat", 0.0)
-                                lon_val = center.get("lon", 0.0)
-                            else:
-                                lat_val = el.get("lat", 0.0)
-                                lon_val = el.get("lon", 0.0)
-
-                            # Skip elements with missing coordinates
-                            lat_val = float(lat_val or 0.0)
-                            lon_val = float(lon_val or 0.0)
-                            if lat_val == 0.0 and lon_val == 0.0:
-                                continue
-
-                            # Build accurate address from all available OSM address fields
-                            full_addr = tags.get("addr:full")
-                            addr_parts = []
-                            for field in ["addr:housenumber", "addr:street", "addr:suburb",
-                                          "addr:district", "addr:city", "addr:postcode"]:
-                                if tags.get(field):
-                                    addr_parts.append(tags[field])
-
-                            if full_addr:
-                                address = full_addr
-                            elif addr_parts:
-                                if query.location.lower() not in [p.lower() for p in addr_parts]:
-                                    addr_parts.append(query.location)
-                                address = ", ".join(addr_parts)
-                            else:
-                                address = query.location
-
-                            # Contact info — comprehensive OSM phone tag coverage
-                            raw_phone = (
-                                tags.get("phone") or
-                                tags.get("contact:phone") or
-                                tags.get("contact:mobile") or
-                                tags.get("mobile") or
-                                tags.get("contact:whatsapp") or
-                                tags.get("whatsapp") or
-                                tags.get("telephone") or
-                                tags.get("tel") or
-                                tags.get("phone:mobile") or
-                                tags.get("contact:telephone") or
-                                tags.get("phone:en") or
-                                tags.get("operator:phone") or
-                                tags.get("phone:IN") or
-                                tags.get("phone:US") or
-                                tags.get("phone:GB") or
-                                tags.get("tollfree") or
-                                tags.get("fax") or ""
-                            )
-                            phone = ""
-                            if raw_phone:
-                                phone = re.split(r'[;/]', str(raw_phone))[0].strip()
-
-                            # Website extraction — checks domains, brand URLs, and social profiles
-                            raw_website = (
-                                tags.get("website") or
-                                tags.get("contact:website") or
-                                tags.get("url") or
-                                tags.get("contact:url") or
-                                tags.get("brand:website") or
-                                tags.get("official_website") or
-                                tags.get("operator:website") or
-                                tags.get("website:en") or ""
-                            )
-
-                            # If no direct website, check official social media pages
-                            if not raw_website:
-                                fb = tags.get("contact:facebook") or tags.get("facebook")
-                                insta = tags.get("contact:instagram") or tags.get("instagram")
-                                tw = tags.get("contact:twitter") or tags.get("twitter")
-                                li = tags.get("contact:linkedin") or tags.get("linkedin")
-                                if fb:
-                                    raw_website = fb if "facebook.com" in fb else f"https://facebook.com/{fb.lstrip('@')}"
-                                elif insta:
-                                    raw_website = insta if "instagram.com" in insta else f"https://instagram.com/{insta.lstrip('@')}"
-                                elif tw:
-                                    raw_website = tw if "twitter.com" in tw or "x.com" in tw else f"https://x.com/{tw.lstrip('@')}"
-                                elif li:
-                                    raw_website = li if "linkedin.com" in li else f"https://linkedin.com/company/{li.lstrip('@')}"
-
-                            # Clean and ensure proper protocol for URLs
-                            display_website = ""
-                            if raw_website:
-                                w_clean = str(raw_website).strip()
-                                if w_clean.startswith(("http://", "https://")):
-                                    display_website = w_clean
-                                elif "." in w_clean and not w_clean.startswith("@"):
-                                    display_website = f"https://{w_clean}"
+                                # Nodes have lat/lon directly; ways & relations have 'center' dict
+                                el_type = el.get("type", "node")
+                                if el_type in ("way", "relation"):
+                                    center = el.get("center", {})
+                                    lat_val = center.get("lat", 0.0)
+                                    lon_val = center.get("lon", 0.0)
                                 else:
-                                    display_website = w_clean
+                                    lat_val = el.get("lat", 0.0)
+                                    lon_val = el.get("lon", 0.0)
 
-                            email = tags.get("email") or tags.get("contact:email") or ""
-                            opening_hours = tags.get("opening_hours", "")
-                            if opening_hours and len(address) < 80:
-                                address += f" | Hours: {opening_hours}"
+                                # Skip elements with missing coordinates
+                                lat_val = _safe_float(lat_val, 0.0)
+                                lon_val = _safe_float(lon_val, 0.0)
+                                if lat_val == 0.0 and lon_val == 0.0:
+                                    continue
 
-                            results.append(
-                                NormalizedBusiness(
-                                    name=name,
-                                    category=query.category.title(),
-                                    phone=phone,
-                                    website=display_website,
-                                    address=address,
-                                    city=query.location,
-                                    latitude=lat_val,
-                                    longitude=lon_val,
-                                    rating=_safe_float(tags.get("stars"), 4.0),
-                                    review_count=_safe_int(tags.get("review_count"), 0),
-                                    source="OpenStreetMap Live Data",
-                                    source_url=display_website or f"https://www.openstreetmap.org/{el_type}/{el.get('id')}",
-                                    provider_id=f"osm_{el.get('id')}"
+                                # Build accurate address from all available OSM address fields
+                                full_addr = tags.get("addr:full")
+                                addr_parts = []
+                                for field in ["addr:housenumber", "addr:street", "addr:suburb",
+                                              "addr:district", "addr:city", "addr:postcode"]:
+                                    if tags.get(field):
+                                        addr_parts.append(str(tags[field]))
+
+                                if full_addr:
+                                    address = str(full_addr)
+                                elif addr_parts:
+                                    if query.location.lower() not in [p.lower() for p in addr_parts]:
+                                        addr_parts.append(query.location)
+                                    address = ", ".join(addr_parts)
+                                else:
+                                    address = query.location
+
+                                # Contact info — comprehensive OSM phone tag coverage
+                                raw_phone = (
+                                    tags.get("phone") or
+                                    tags.get("contact:phone") or
+                                    tags.get("contact:mobile") or
+                                    tags.get("mobile") or
+                                    tags.get("contact:whatsapp") or
+                                    tags.get("whatsapp") or
+                                    tags.get("telephone") or
+                                    tags.get("tel") or
+                                    tags.get("phone:mobile") or
+                                    tags.get("contact:telephone") or
+                                    tags.get("phone:en") or
+                                    tags.get("operator:phone") or
+                                    tags.get("phone:IN") or
+                                    tags.get("phone:US") or
+                                    tags.get("phone:GB") or
+                                    tags.get("tollfree") or
+                                    tags.get("fax") or ""
                                 )
-                            )
+                                phone = ""
+                                if raw_phone:
+                                    phone = re.split(r'[;/]', str(raw_phone))[0].strip()
+
+                                # Website extraction — checks domains, brand URLs, and social profiles
+                                raw_website = (
+                                    tags.get("website") or
+                                    tags.get("contact:website") or
+                                    tags.get("url") or
+                                    tags.get("contact:url") or
+                                    tags.get("brand:website") or
+                                    tags.get("official_website") or
+                                    tags.get("operator:website") or
+                                    tags.get("website:en") or ""
+                                )
+
+                                # If no direct website, check official social media pages
+                                if not raw_website:
+                                    fb = tags.get("contact:facebook") or tags.get("facebook")
+                                    insta = tags.get("contact:instagram") or tags.get("instagram")
+                                    tw = tags.get("contact:twitter") or tags.get("twitter")
+                                    li = tags.get("contact:linkedin") or tags.get("linkedin")
+                                    if fb:
+                                        fb_s = str(fb)
+                                        raw_website = fb_s if "facebook.com" in fb_s else f"https://facebook.com/{fb_s.lstrip('@')}"
+                                    elif insta:
+                                        in_s = str(insta)
+                                        raw_website = in_s if "instagram.com" in in_s else f"https://instagram.com/{in_s.lstrip('@')}"
+                                    elif tw:
+                                        tw_s = str(tw)
+                                        raw_website = tw_s if "twitter.com" in tw_s or "x.com" in tw_s else f"https://x.com/{tw_s.lstrip('@')}"
+                                    elif li:
+                                        li_s = str(li)
+                                        raw_website = li_s if "linkedin.com" in li_s else f"https://linkedin.com/company/{li_s.lstrip('@')}"
+
+                                # Clean and ensure proper protocol for URLs
+                                display_website = ""
+                                if raw_website:
+                                    w_clean = str(raw_website).strip()
+                                    if w_clean.startswith(("http://", "https://")):
+                                        display_website = w_clean
+                                    elif "." in w_clean and not w_clean.startswith("@"):
+                                        display_website = f"https://{w_clean}"
+                                    else:
+                                        display_website = w_clean
+
+                                opening_hours = tags.get("opening_hours", "")
+                                if opening_hours and len(address) < 80:
+                                    address += f" | Hours: {opening_hours}"
+
+                                results.append(
+                                    NormalizedBusiness(
+                                        name=name,
+                                        category=query.category.title(),
+                                        phone=phone,
+                                        website=display_website,
+                                        address=address,
+                                        city=query.location,
+                                        latitude=lat_val,
+                                        longitude=lon_val,
+                                        rating=_safe_float(tags.get("stars"), 4.0),
+                                        review_count=_safe_int(tags.get("review_count"), 0),
+                                        source="OpenStreetMap Live Data",
+                                        source_url=display_website or f"https://www.openstreetmap.org/{el_type}/{el.get('id')}",
+                                        provider_id=f"osm_{el.get('id')}"
+                                    )
+                                )
+                            except Exception as item_err:
+                                logger.debug(f"Skipping malformed OSM element: {item_err}")
+                                continue
 
                         logger.info(f"Overpass ({endpoint}): found {len(results)} live businesses for '{query.category}' in '{query.location}'")
                         return results
@@ -690,19 +712,24 @@ class GeoapifyProvider(BusinessDataProvider):
         "salon": "service.beauty", "salons": "service.beauty",
         "spa": "service.beauty.spa", "barbershop": "service.beauty.hairdresser",
         "clinic": "healthcare.clinic", "hospital": "healthcare.hospital",
+        "healthcare": "healthcare.clinic,healthcare.hospital",
         "pharmacy": "healthcare.pharmacy", "dentist": "healthcare.dentist",
         "dental": "healthcare.dentist", "optician": "healthcare.pharmacy",
         "gym": "sport.fitness", "fitness": "sport.fitness", "yoga": "sport.fitness",
         "veterinary": "pet.veterinary", "vet": "pet.veterinary",
         "hotel": "accommodation.hotel", "hostel": "accommodation.hostel",
         "auto repair": "service.vehicle.repair", "car repair": "service.vehicle.repair",
-        "mechanic": "service.vehicle.repair", "plumber": "service.trade",
-        "electrician": "service.trade", "cleaning": "service.cleaning",
+        "mechanic": "service.vehicle.repair",
+        "plumber": "service.trade,office.company", "plumbing": "service.trade,office.company",
+        "roofing": "service.trade,office.company", "roofer": "service.trade,office.company",
+        "hvac": "service.trade,office.company", "contractor": "service.trade,office.company",
+        "electrician": "service.trade,office.company", "cleaning": "service.cleaning,office.company",
         "lawyer": "office.lawyer", "law firm": "office.lawyer",
         "accountant": "office.accountant", "accounting": "office.accountant",
         "real estate": "office.estate_agent", "marketing": "office.company",
+        "marketing agency": "office.company",
         "supermarket": "commercial.supermarket", "retail": "commercial.shopping_mall,commercial.clothing",
-        "photography": "service.photography", "school": "education.school",
+        "photography": "service.photography,office.company", "school": "education.school",
     }
 
     def __init__(self, api_key: Optional[str] = None):
@@ -731,7 +758,7 @@ class GeoapifyProvider(BusinessDataProvider):
 
         lat = geo["lat"]
         lon = geo["lon"]
-        radius_m = OverpassBusinessProvider()._parse_radius_meters(query.radius)
+        radius_m = max(5000, OverpassBusinessProvider()._parse_radius_meters(query.radius))
 
         params = {
             "categories": geo_cat,
@@ -747,70 +774,84 @@ class GeoapifyProvider(BusinessDataProvider):
                 if resp.status_code == 200:
                     data = resp.json()
                     features = data.get("features", [])
+                    if not features:
+                        fallback_params = {
+                            **params,
+                            "categories": f"{geo_cat},commercial,service,office",
+                            "filter": f"circle:{lon},{lat},20000",
+                        }
+                        resp2 = await client.get(self.PLACES_URL, params=fallback_params)
+                        if resp2.status_code == 200:
+                            features = resp2.json().get("features", [])
                     results = []
                     for f in features:
-                        props = f.get("properties", {})
-                        name = props.get("name")
-                        if not name:
-                            continue
+                        try:
+                            props = f.get("properties", {})
+                            raw_name = props.get("name")
+                            if raw_name is None or str(raw_name).strip() == "":
+                                continue
+                            name = str(raw_name).strip()
 
-                        contact = props.get("contact", {})
-                        raw_data = props.get("datasource", {}).get("raw", {})
+                            contact = props.get("contact", {})
+                            raw_data = props.get("datasource", {}).get("raw", {})
 
-                        raw_phone = (
-                            contact.get("phone") or
-                            props.get("phone") or
-                            raw_data.get("phone") or
-                            raw_data.get("contact:phone") or
-                            raw_data.get("contact:mobile") or
-                            raw_data.get("mobile") or ""
-                        )
-                        phone = re.split(r'[;/]', str(raw_phone))[0].strip() if raw_phone else ""
-
-                        raw_website = (
-                            props.get("website") or
-                            contact.get("website") or
-                            raw_data.get("website") or
-                            raw_data.get("contact:website") or
-                            raw_data.get("url") or
-                            raw_data.get("contact:url") or ""
-                        )
-
-                        # Clean website url
-                        website = ""
-                        if raw_website:
-                            w_clean = str(raw_website).strip()
-                            if w_clean.startswith(("http://", "https://")):
-                                website = w_clean
-                            elif "." in w_clean and not w_clean.startswith("@"):
-                                website = f"https://{w_clean}"
-                            else:
-                                website = w_clean
-
-                        addr = props.get("formatted") or props.get("address_line1") or query.location
-                        place_id = props.get("place_id", "")
-                        lat_val = _safe_float(props.get("lat"), 0.0)
-                        lon_val = _safe_float(props.get("lon"), 0.0)
-                        stars = raw_data.get("stars")
-                        rating = _safe_float(stars, 4.2)
-
-                        results.append(
-                            NormalizedBusiness(
-                                name=name,
-                                category=query.category.title(),
-                                phone=str(phone) if phone else "",
-                                website=website,
-                                address=addr,
-                                city=query.location,
-                                latitude=lat_val,
-                                longitude=lon_val,
-                                rating=rating,
-                                review_count=18,
-                                source="Geoapify Places",
-                                source_url=website or f"https://www.google.com/maps/search/?api=1&query={name}+{query.location}",
-                                provider_id=f"geoapify_{place_id}" if place_id else None
+                            raw_phone = (
+                                contact.get("phone") or
+                                props.get("phone") or
+                                raw_data.get("phone") or
+                                raw_data.get("contact:phone") or
+                                raw_data.get("contact:mobile") or
+                                raw_data.get("mobile") or ""
                             )
-                        )
+                            phone = re.split(r'[;/]', str(raw_phone))[0].strip() if raw_phone else ""
+
+                            raw_website = (
+                                props.get("website") or
+                                contact.get("website") or
+                                raw_data.get("website") or
+                                raw_data.get("contact:website") or
+                                raw_data.get("url") or
+                                raw_data.get("contact:url") or ""
+                            )
+
+                            # Clean website url
+                            website = ""
+                            if raw_website:
+                                w_clean = str(raw_website).strip()
+                                if w_clean.startswith(("http://", "https://")):
+                                    website = w_clean
+                                elif "." in w_clean and not w_clean.startswith("@"):
+                                    website = f"https://{w_clean}"
+                                else:
+                                    website = w_clean
+
+                            addr = str(props.get("formatted") or props.get("address_line1") or query.location)
+                            place_id = str(props.get("place_id", ""))
+                            lat_val = _safe_float(props.get("lat"), 0.0)
+                            lon_val = _safe_float(props.get("lon"), 0.0)
+                            stars = raw_data.get("stars")
+                            rating = _safe_float(stars, 4.2)
+
+                            results.append(
+                                NormalizedBusiness(
+                                    name=name,
+                                    category=query.category.title(),
+                                    phone=str(phone) if phone else "",
+                                    website=website,
+                                    address=addr,
+                                    city=query.location,
+                                    latitude=lat_val,
+                                    longitude=lon_val,
+                                    rating=rating,
+                                    review_count=18,
+                                    source="Geoapify Places",
+                                    source_url=website or f"https://www.google.com/maps/search/?api=1&query={name}+{query.location}",
+                                    provider_id=f"geoapify_{place_id}" if place_id else None
+                                )
+                            )
+                        except Exception as item_err:
+                            logger.debug(f"Skipping malformed Geoapify feature: {item_err}")
+                            continue
 
                     logger.info(f"Geoapify: Found {len(results)} places for '{query.category}' in '{query.location}'")
                     return results

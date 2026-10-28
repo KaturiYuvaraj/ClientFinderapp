@@ -379,7 +379,7 @@ class AutoContactEnricher:
                             current_phone=biz.phone,
                             current_website=biz.website
                         ),
-                        timeout=5.0
+                        timeout=3.5
                     )
                     if new_phone:
                         biz.phone = new_phone
@@ -391,7 +391,7 @@ class AutoContactEnricher:
         try:
             await asyncio.wait_for(
                 asyncio.gather(*[_enrich_item(b) for b in target_items], return_exceptions=True),
-                timeout=15.0
+                timeout=8.0
             )
             logger.info(f"AutoContactEnricher: Processed {len(target_items)} leads for missing contact details.")
         except asyncio.TimeoutError:

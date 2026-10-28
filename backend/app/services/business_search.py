@@ -57,7 +57,7 @@ class BusinessSearchService:
                     businesses=raw_businesses,
                     category=query.category,
                     location=query.location,
-                    max_enrich=12
+                    max_enrich=6
                 )
             except Exception as e:
                 logger.warning(f"Contact enrichment batch error: {e}")

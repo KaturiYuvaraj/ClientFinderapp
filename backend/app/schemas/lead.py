@@ -17,6 +17,17 @@ class NormalizedBusiness(BaseModel):
     source_url: Optional[str] = ""
     provider_id: Optional[str] = None
 
+    @field_validator(
+        "name", "category", "phone", "website", "address",
+        "city", "source", "source_url", "provider_id",
+        mode="before"
+    )
+    @classmethod
+    def coerce_str(cls, v):
+        if v is None:
+            return ""
+        return str(v)
+
 class LeadCreate(BaseModel):
     provider_id: Optional[str] = None
     business_name: str
