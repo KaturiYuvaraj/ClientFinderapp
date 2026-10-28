@@ -89,7 +89,7 @@ class AIService:
         if has_website:
             verified_facts.append(f"Business has an active website listed: {business.website}")
         else:
-            verified_facts.append("Missing Website / Web App: No official website or web app found in public records")
+            verified_facts.append("No website URL or Web App was returned by the business-data provider")
 
         if not has_mobile_app:
             verified_facts.append("Missing Mobile Application: No dedicated iOS or Android mobile app detected")
