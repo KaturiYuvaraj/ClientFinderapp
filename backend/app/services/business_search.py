@@ -152,28 +152,18 @@ class BusinessSearchService:
         wants_marketing = any(w in service_low for w in ("marketing", "seo", "social", "ads", "content", "email"))
 
         if wants_website and wants_app and wants_marketing:
-            strict_all_3 = [
+            # Strictly return ONLY businesses that have NO website/webapp, NO mobile app, AND NO digital marketing
+            sorted_items = [
                 x for x in sorted_items
                 if not x.has_website and not x.has_mobile_app and not x.has_digital_marketing
             ]
-            if strict_all_3:
-                sorted_items = strict_all_3
-            else:
-                no_web = [x for x in sorted_items if not x.has_website]
-                if no_web:
-                    sorted_items = no_web
-        elif wants_website:
-            no_web = [x for x in sorted_items if not x.has_website]
-            if no_web:
-                sorted_items = no_web
-        elif wants_app:
-            no_app = [x for x in sorted_items if not x.has_mobile_app]
-            if no_app:
-                sorted_items = no_app
-        elif wants_marketing:
-            no_mkt = [x for x in sorted_items if not x.has_digital_marketing]
-            if no_mkt:
-                sorted_items = no_mkt
+        else:
+            if wants_website:
+                sorted_items = [x for x in sorted_items if not x.has_website]
+            if wants_app:
+                sorted_items = [x for x in sorted_items if not x.has_mobile_app]
+            if wants_marketing:
+                sorted_items = [x for x in sorted_items if not x.has_digital_marketing]
 
         return SearchResponse(
             query=query,

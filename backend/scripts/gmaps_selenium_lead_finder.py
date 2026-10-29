@@ -298,41 +298,46 @@ def extract_email(url):
 
 def probe_brand_domain_sync(name: str, city: str) -> Optional[str]:
     """
-    Rigorously detects hidden websites like bawarchionline.com or brand.in.
-    Prevents false positives where a business does have a website, but GMB omits it.
+    Rigorously detects hidden websites like bawarchionline.com, sakshitravels.in, or brand.in.
+    Uses Chrome TLS impersonation to bypass HTTP 406/403 security blocks on Indian hosting servers.
     """
-    import urllib.request
     clean = re.sub(r"[^a-z0-9\s]", " ", name.lower()).strip()
-    words = [w for w in clean.split() if len(w) >= 3 and w not in ("restaurant", "hotel", "agency", "services", "tours", "travel")]
+    words = [w for w in clean.split() if len(w) >= 3 and w not in ("restaurant", "hotel", "agency", "services", "tours", "travel", "family", "international")]
     if not words:
         words = [w for w in clean.split() if len(w) >= 3]
     if not words:
         return None
 
-    slug = words[0]
-    full_slug = "".join(words[:2])
+    primary = words[0]
+    two_tok = "".join(words[:2])
 
-    test_urls = [
-        f"https://www.{slug}.com",
-        f"https://{slug}.in",
-        f"https://www.{slug}.in",
-        f"https://{slug}online.com",
-        f"https://{slug}online.in",
-        f"https://{full_slug}.com",
-        f"https://{full_slug}.in",
-        f"https://{full_slug}online.com",
-    ]
+    test_slugs = [primary, two_tok, primary + "online", primary + "travels", primary + "tours", primary + "restaurant", primary + "hotels"]
+    test_urls = []
+    for s in test_slugs:
+        test_urls.append(f"https://www.{s}.com")
+        test_urls.append(f"https://{s}.com")
+        test_urls.append(f"https://www.{s}.in")
+        test_urls.append(f"https://{s}.in")
+        test_urls.append(f"https://www.{s}.co.in")
+        test_urls.append(f"https://{s}.travel")
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    client = None
+    try:
+        import primp
+        client = primp.Client(impersonate="chrome_131")
+    except Exception:
+        import httpx
+        client = httpx.Client(timeout=2.5, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0"})
 
     for u in test_urls:
         try:
-            req = urllib.request.Request(u, headers=headers)
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                if resp.status == 200:
-                    body = resp.read(60000).decode("utf-8", errors="ignore").lower()
-                    if slug in body and (city.lower() in body or any(k in body for k in ("travel", "food", "hotel", "tour", "book", "order"))):
-                        return u
+            resp = client.get(u)
+            if resp.status_code == 200 and len(resp.text) >= 600:
+                body = resp.text.lower()[:80000]
+                if any(m in body[:20000] for m in ("domain is for sale", "parked free", "sedoparking", "dan.com")):
+                    continue
+                if primary in body or city.lower() in body:
+                    return u
         except Exception:
             pass
 
@@ -501,3 +506,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -56,16 +56,21 @@ DIRECTORY_DOMAINS = {
 }
 
 DIRECTORY_PATH_PATTERNS = [
-    re.compile(r'/(?:business-directory|directory|categories|category|salon|salons|places|place|biz|listing|listings|review|reviews|post|posts|lvp|city|search)/', re.IGNORECASE),
+    re.compile(r'/(?:business-directory|directory|biz-listing|yellow-pages|city-guide|listings)/', re.IGNORECASE),
     re.compile(r'/sites/[^/]+', re.IGNORECASE),
 ]
+
+ADJECTIVES = {
+    'big', 'famous', 'royal', 'grand', 'new', 'old', 'super', 'best', 'great', 'original',
+    'first', 'top', 'classic', 'star', 'prime', 'golden', 'elite', 'supreme', 'modern'
+}
 
 GENERIC_STOPWORDS = {
     'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'to', 'from',
     'inc', 'incorporated', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company',
     'est', 'established', 'group', 'services', 'service', 'solutions', 'center', 'centre',
     'shop', 'shops', 'store', 'stores', 'place', 'places', 'bar', 'cafe', 'restaurant',
-    'salon', 'salons', 'clinic', 'office', 'agency', 'online', 'official', 'usa', 'uk'
+    'salon', 'salons', 'clinic', 'office', 'agency', 'online', 'official', 'usa', 'uk', 'india'
 }
 
 # Accurate phone number regexes (UK, North American, International)
@@ -206,46 +211,41 @@ def is_official_website(candidate_url: str, business_name: str, location: str = 
     domain_name = extract_brand_domain(netloc)
 
     # Rule 3: Business name relevance matching (normalize accents so Épicerie -> epicerie)
-    norm_biz_name = unicodedata.normalize('NFKD', str(business_name or '')).encode('ascii', 'ignore').decode('ascii')
-    norm_title = unicodedata.normalize('NFKD', str(snippet_title or '')).encode('ascii', 'ignore').decode('ascii')
-    name_clean = re.sub(r'[^a-z0-9\s]', ' ', norm_biz_name.lower())
-    words = [w for w in name_clean.split() if len(w) >= 2]
-
-    loc_words = set(re.sub(r'[^a-z0-9\s]', ' ', location.lower()).split()) if location else set()
-
-    # Core brand tokens: filter out stopwords and location words
-    core_tokens = [w for w in words if w not in GENERIC_STOPWORDS and w not in loc_words and len(w) >= 3]
-
-    if not core_tokens:
-        core_tokens = [w for w in words if len(w) >= 3]
-
-    condensed_name = re.sub(r'[^a-z0-9]', '', norm_biz_name.lower())
-    condensed_core = "".join(core_tokens)
-    domain_clean = re.sub(r'[^a-z0-9]', '', domain_name)
-
-    # A) Condensed full name or core name is contained in domain
-    if condensed_core and (condensed_core in domain_clean or domain_clean == condensed_core):
-        return True
-    if len(condensed_name) >= 5 and condensed_name in domain_clean:
-        return True
-
-    # B) Multi-word businesses: MUST match ALL core tokens (or their stems)
-    if len(core_tokens) >= 2:
-        all_match = all(token_matches_domain(token, domain_clean) for token in core_tokens)
-        if all_match:
-            first_core = core_tokens[0].rstrip('s')
-            first_word = words[0] if words else ""
-            # Must start with first core token or first word (prevents '4cornersbarber' matching 'The Corner Barbershop')
-            if domain_clean.startswith(first_core) or (first_word and domain_clean.startswith(first_word)):
-                return True
-            if norm_title and (condensed_core in re.sub(r'[^a-z0-9]', '', norm_title.lower()) or norm_biz_name.lower() in norm_title.lower()):
-                return True
+    norm_biz_name = _ascii_str(business_name).lower().replace("&", " and ")
+    norm_title = _ascii_str(snippet_title).lower()
+    tokens = [w for w in re.sub(r'[^a-z0-9\s]', ' ', norm_biz_name).split() if len(w) >= 2]
+    if not tokens:
         return False
 
-    # C) Single core token business (e.g. "Nike" or "Bliss")
-    if len(core_tokens) == 1:
-        single = core_tokens[0].rstrip('s')
-        if domain_clean.startswith(single) or domain_clean == single:
+    non_stop = [w for w in tokens if w not in GENERIC_STOPWORDS]
+    core = [w for w in non_stop if w not in ADJECTIVES]
+    if not core:
+        core = non_stop or tokens
+
+    domain_clean = re.sub(r'[^a-z0-9]', '', netloc.split('.')[0] if '.' in netloc else netloc)
+    full_domain = re.sub(r'[^a-z0-9]', '', netloc)
+
+    # 1. Primary brand token check (e.g. 'bawarchi' in 'bawarchionline.com', 'minerva' in 'minervahotels.in', 'unik' in 'unikwax.com')
+    primary = core[0]
+    if len(primary) >= 3 and primary in full_domain:
+        return True
+
+    # 2. Condensed core or full name in domain
+    condensed_core = "".join(core)
+    condensed_name = re.sub(r'[^a-z0-9]', '', norm_biz_name)
+    if (len(condensed_core) >= 4 and condensed_core in full_domain) or (len(condensed_name) >= 5 and condensed_name in full_domain):
+        return True
+
+    # 3. First two tokens combined (e.g. 'sakshitravels', 'myjourney', 'cafeice')
+    if len(tokens) >= 2:
+        two_tok = tokens[0] + tokens[1]
+        if len(two_tok) >= 4 and two_tok in full_domain:
+            return True
+
+    # 4. Snippet title match + brand domain
+    if norm_title and primary in norm_title:
+        first_part = netloc.split('.')[0]
+        if any(w in first_part for w in core[:2]):
             return True
 
     return False
@@ -270,48 +270,99 @@ class AutoContactEnricher:
 
     @staticmethod
     def _domain_slug_candidates(name: str, city: str) -> List[str]:
-        """Builds likely brand domain slugs: full name, without 'the', without legal suffixes, core tokens."""
+        """Builds realistic brand domain URLs: primary brand, first two tokens, core tokens, industry suffixes."""
         clean = _ascii_str(name).lower().replace("&", " and ")
         tokens = [t for t in re.sub(r"[^a-z0-9\s]", " ", clean).split() if t]
         if not tokens:
             return []
-        legal = {"inc", "llc", "ltd", "co", "corp", "company", "nyc", "ny"}
-        variants = []
 
-        def add(tok_list):
-            s = "".join(tok_list)
-            if len(s) >= 4 and s not in variants:
-                variants.append(s)
+        legal = {"inc", "llc", "ltd", "co", "corp", "company", "pvt", "limited", "nyc", "ny"}
+        non_stop = [t for t in tokens if t not in GENERIC_STOPWORDS and t not in legal]
+        core = [t for t in non_stop if t not in ADJECTIVES]
+        if not core:
+            core = non_stop or tokens
 
-        add(tokens)
-        no_the = tokens[1:] if tokens[0] == "the" else tokens
-        add(no_the)
-        no_legal = [t for t in no_the if t not in legal]
-        add(no_legal)
-        add([t for t in no_legal if t != "and"])
-        core = [t for t in no_legal if t not in GENERIC_STOPWORDS and t != "and"]
+        no_adj = [t for t in tokens if t not in ADJECTIVES and t not in legal]
+        city_clean = re.sub(r"[^a-z0-9]", "", _ascii_str(city).lower()) if city else ""
+
+        slugs = []
+        def add_slug(s):
+            s_clean = re.sub(r"[^a-z0-9]", "", s.lower())
+            if len(s_clean) >= 3 and s_clean not in slugs:
+                slugs.append(s_clean)
+
+        # 1. Full tokens combined
+        add_slug("".join(tokens))
+        if tokens[0] == "the" and len(tokens) > 1:
+            add_slug("".join(tokens[1:]))
+
+        # 2. Stripped adjectives (e.g. 'Big Famous Deli & Grocery' -> 'deligrocery', 'delingrocery')
+        if no_adj and no_adj != tokens:
+            add_slug("".join(no_adj))
+            add_slug("".join([t for t in no_adj if t != "and"]))
+            if "and" in no_adj:
+                add_slug("".join([("n" if t == "and" else t) for t in no_adj]))
+
+        # 3. Core tokens
+        add_slug("".join(core))
+
+        # 4. First 2 tokens & variations
+        if len(tokens) >= 2:
+            add_slug(tokens[0] + tokens[1])
         if len(core) >= 2:
-            add(core)
+            add_slug(core[0] + core[1])
+        if len(no_adj) >= 2:
+            add_slug(no_adj[0] + no_adj[1])
 
+        # 5. Primary brand token (e.g. 'bawarchi', 'minerva', 'sakshi', 'unikwax')
+        primary = core[0]
+        add_slug(primary)
+
+        # 6. Industry suffixes on primary brand
+        add_slug(primary + "online")
+        add_slug(primary + "travels")
+        add_slug(primary + "tours")
+        add_slug(primary + "hotels")
+        add_slug(primary + "restaurant")
+        add_slug(primary + "cafe")
+
+        # 7. First 2 tokens + industry suffixes (e.g. 'myjourney' + 'travels' -> 'myjourneytravels')
+        if len(tokens) >= 2:
+            add_slug(tokens[0] + tokens[1] + "travels")
+            add_slug(tokens[0] + tokens[1] + "tours")
+            add_slug(tokens[0] + tokens[1] + "online")
+
+        if city_clean:
+            add_slug(primary + city_clean)
+            if len(core) >= 2:
+                add_slug(core[0] + core[1] + city_clean)
+
+        # Generate URLs with standard & industry TLDs
         domains = []
-        for v in variants[:3]:
-            domains.append(f"https://www.{v}.com")
-            domains.append(f"https://www.{v}.in")
-            domains.append(f"https://{v}.com")
-            domains.append(f"https://{v}.in")
-            domains.append(f"https://www.{v}online.com")
-            domains.append(f"https://{v}online.com")
-            domains.append(f"https://www.{v}online.in")
-            domains.append(f"https://{v}online.in")
-            domains.append(f"https://www.{v}.co.in")
-        return domains[:14]
+        for s in slugs[:16]:
+            domains.append(f"https://www.{s}.com")
+            domains.append(f"https://{s}.com")
+            domains.append(f"https://www.{s}.in")
+            domains.append(f"https://{s}.in")
+            domains.append(f"https://www.{s}.co.in")
+            if any(travel_kw in clean for travel_kw in ["travel", "tour", "vacation", "holiday"]):
+                domains.append(f"https://www.{s}.travel")
+                domains.append(f"https://{s}.travel")
+
+        # Deduplicate preserving order
+        seen = set()
+        deduped = []
+        for d in domains:
+            if d not in seen:
+                seen.add(d)
+                deduped.append(d)
+        return deduped[:24]
 
     async def _probe_brand_domain_async(self, biz: NormalizedBusiness, location: str) -> None:
         """
-        Fast async HTTP probe checking if the business owns a brand domain (e.g. www.<brand>.com).
-        Catches businesses that have a live website which was not tagged in the map data.
-        A candidate site is accepted only if it mentions the business name AND matches
-        the business's phone number, ZIP code, street, or city.
+        Fast async HTTP probe using Chrome TLS impersonation (primp) to check if the business owns a brand domain.
+        Catches businesses that have an active website (e.g. bawarchionline.com, sakshitravels.in, cafeicemagic.com)
+        which was not tagged in the map listing.
         """
         if biz.website:
             return
@@ -321,47 +372,46 @@ class AutoContactEnricher:
         if not candidates:
             return
 
-        words = [w for w in re.sub(r"[^a-z0-9\s]", " ", clean_name).split() if len(w) >= 3 and w not in GENERIC_STOPWORDS]
-        if not words:
-            words = [w for w in re.sub(r"[^a-z0-9\s]", " ", clean_name).split() if len(w) >= 3]
+        tokens = [t for t in re.sub(r"[^a-z0-9\s]", " ", clean_name).split() if t]
+        non_stop = [t for t in tokens if t not in GENERIC_STOPWORDS]
+        core = [t for t in non_stop if t not in ADJECTIVES] or non_stop or tokens
+        primary = core[0]
 
-        # Location evidence from the business record
         addr_ascii = _ascii_str(biz.address or "").lower()
         phone_digits = re.sub(r"[^\d]", "", biz.phone or "")
         phone_tail = phone_digits[-7:] if len(phone_digits) >= 7 else ""
         zip_codes = re.findall(r"\b\d{5,6}\b", addr_ascii)
-        addr_parts = [p.strip() for p in addr_ascii.split(",") if p.strip()]
-        street_tokens = []
-        if len(addr_parts) >= 2:
-            street_words = [w for w in re.sub(r"[^a-z\s]", " ", addr_parts[1]).split() if len(w) >= 4 and w not in ("street", "avenue", "road", "boulevard")]
-            street_tokens = street_words[:2]
         city_tokens = [city_clean] if city_clean else []
-        for p in addr_parts[2:4]:
-            p_clean = re.sub(r"[^a-z\s]", "", p).strip()
-            if len(p_clean) >= 4:
-                city_tokens.append(p_clean)
 
-        async def _check(client: httpx.AsyncClient, url: str):
+        client = None
+        try:
+            import primp
+            client = primp.Client(impersonate="chrome_131", timeout=2.0)
+        except Exception:
+            client = httpx.Client(timeout=2.5, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0"})
+
+        def _check_one_url(url: str):
             try:
-                resp = await client.get(url)
+                resp = client.get(url)
                 if resp.status_code != 200 or len(resp.text) < 600:
                     return None
                 final_url = str(resp.url)
                 parsed_final = urlparse(final_url)
                 if is_directory(parsed_final.netloc):
                     return None
-                html_full = _ascii_str(resp.text[:200000]).lower()
+                html_full = _ascii_str(resp.text[:300000]).lower()
                 if any(m in html_full[:30000] for m in PARKED_DOMAIN_MARKERS):
                     return None
-                if words and not all(w in html_full for w in words[:2]):
-                    return None
+
+                netloc_clean = re.sub(r"[^a-z0-9]", "", parsed_final.netloc.lower())
+                brand_in_domain = (len(primary) >= 3 and primary in netloc_clean) or any(len(c) >= 4 and c in netloc_clean for c in core[:2])
+
                 html_digits = re.sub(r"[^\d]", "", html_full)
                 evidence = (
-                    (phone_tail and phone_tail in html_digits)
+                    brand_in_domain
+                    or (phone_tail and phone_tail in html_digits)
                     or any(z in html_full for z in zip_codes)
-                    or (street_tokens and all(s in html_full for s in street_tokens))
                     or any(c and c in html_full for c in city_tokens)
-                    or any(len(w) >= 5 and w in parsed_final.netloc.lower() for w in words)
                 )
                 if not evidence:
                     return None
@@ -369,11 +419,15 @@ class AutoContactEnricher:
             except Exception:
                 return None
 
-        async with httpx.AsyncClient(timeout=3.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            results = await asyncio.gather(*[_check(client, u) for u in candidates])
+        # Run concurrent checks via ThreadPoolExecutor
+        loop = asyncio.get_event_loop()
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(12, len(candidates))) as executor:
+            tasks = [loop.run_in_executor(executor, _check_one_url, u) for u in candidates]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for res in results:
-            if not res:
+            if not res or isinstance(res, Exception):
                 continue
             parsed_final, html_full, raw_html = res
             biz.website = f"{parsed_final.scheme}://{parsed_final.netloc}"
@@ -455,10 +509,20 @@ class AutoContactEnricher:
 
         try:
             ddgs = DDGS()
-            try:
-                results = list(ddgs.text(query, backend="lite", max_results=6))
-            except Exception:
-                results = list(ddgs.text(query, max_results=6))
+            search_queries = [
+                f'"{clean_name}" {city_short} official website' if city_short else f'"{clean_name}" official website',
+                f'{clean_name} {city_short} website' if city_short else f'{clean_name} website',
+                query
+            ]
+            results = []
+            for q in search_queries:
+                try:
+                    res_batch = list(ddgs.text(q, max_results=5))
+                    if res_batch:
+                        results.extend(res_batch)
+                        break
+                except Exception:
+                    pass
 
             norm_name_tokens = [
                 w for w in re.sub(r"[^a-z0-9\s]", " ", clean_name.lower()).split()
@@ -512,26 +576,31 @@ class AutoContactEnricher:
                     if found_ph:
                         phone = found_ph
 
-            # Step 2: If we now have an official website, scrape homepage for phone/social/app links
+            # Step 2: If we now have an official website, scrape homepage for phone/social/app links using primp (bypasses HTTP 406/403)
             if website:
                 try:
-                    with httpx.Client(timeout=2.5, follow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'}) as client:
-                        resp = client.get(website)
-                        if resp.status_code == 200:
-                            html = resp.text
-                            html_low = html.lower()
-                            if "apps.apple.com" in html_low or "play.google.com" in html_low:
-                                has_app = True
-                            if any(s in html_low for s in ("instagram.com/", "facebook.com/", "tiktok.com/")):
-                                has_social = True
+                    import primp
+                    scrape_client = primp.Client(impersonate="chrome_131")
+                except Exception:
+                    scrape_client = httpx.Client(timeout=3.0, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0'})
+
+                try:
+                    resp = scrape_client.get(website)
+                    if resp.status_code == 200:
+                        html = resp.text
+                        html_low = html.lower()
+                        if "apps.apple.com" in html_low or "play.google.com" in html_low:
+                            has_app = True
+                        if any(s in html_low for s in ("instagram.com/", "facebook.com/", "tiktok.com/")):
+                            has_social = True
+                        if not phone:
+                            tel_match = re.search(r'href=["\']tel:([^"\'\s?]+)["\']', html)
+                            if tel_match:
+                                raw_tel = tel_match.group(1).strip()
+                                if clean_phone_candidate(raw_tel):
+                                    phone = raw_tel
                             if not phone:
-                                tel_match = re.search(r'href=["\']tel:([^"\'\s?]+)["\']', html)
-                                if tel_match:
-                                    raw_tel = tel_match.group(1).strip()
-                                    if clean_phone_candidate(raw_tel):
-                                        phone = raw_tel
-                                if not phone:
-                                    phone = extract_phone_from_text(html)
+                                phone = extract_phone_from_text(html)
                 except Exception as scrape_err:
                     logger.debug(f"Direct homepage scrape skipped for '{name}': {scrape_err}")
 

@@ -1517,6 +1517,30 @@ class GoogleMapsWebProvider(BusinessDataProvider):
                 )
             )
 
+        # Propagate verified brand websites and social profiles across multiple branches of the same business
+        brand_websites = {}
+        brand_social = set()
+        brand_apps = set()
+        for biz in results:
+            norm = re.sub(r"[^a-z0-9]", "", biz.name.lower())
+            if not norm:
+                continue
+            if biz.website and norm not in brand_websites:
+                brand_websites[norm] = biz.website
+            if biz.has_social_media:
+                brand_social.add(norm)
+            if biz.has_mobile_app:
+                brand_apps.add(norm)
+
+        for biz in results:
+            norm = re.sub(r"[^a-z0-9]", "", biz.name.lower())
+            if norm in brand_websites and not biz.website:
+                biz.website = brand_websites[norm]
+            if norm in brand_social:
+                biz.has_social_media = True
+            if norm in brand_apps:
+                biz.has_mobile_app = True
+
         # Sort so candidates that have a phone number but NO website come first
         results.sort(
             key=lambda b: (
