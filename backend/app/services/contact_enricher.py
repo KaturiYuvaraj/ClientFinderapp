@@ -299,8 +299,12 @@ class AutoContactEnricher:
             domains.append(f"https://www.{v}.in")
             domains.append(f"https://{v}.com")
             domains.append(f"https://{v}.in")
+            domains.append(f"https://www.{v}online.com")
+            domains.append(f"https://{v}online.com")
+            domains.append(f"https://www.{v}online.in")
+            domains.append(f"https://{v}online.in")
             domains.append(f"https://www.{v}.co.in")
-        return domains[:9]
+        return domains[:14]
 
     async def _probe_brand_domain_async(self, biz: NormalizedBusiness, location: str) -> None:
         """
@@ -357,6 +361,7 @@ class AutoContactEnricher:
                     or any(z in html_full for z in zip_codes)
                     or (street_tokens and all(s in html_full for s in street_tokens))
                     or any(c and c in html_full for c in city_tokens)
+                    or any(len(w) >= 5 and w in parsed_final.netloc.lower() for w in words)
                 )
                 if not evidence:
                     return None

@@ -118,25 +118,45 @@ class AIService:
         if any(w in service_clean for w in ["web", "site", "landing", "software"]):
             opportunity_type = "Website Development & Modernization"
             if not has_website:
-                if has_phone and (review_count > 50 or rating >= 4.0):
-                    score = 94
-                    confidence = "Very High"
-                    reason = "Popular establishment with active customer demand and verified phone number, but completely missing an official website."
-                    inferences.append("High footfall and review volume indicate strong business viability and ability to invest in a web presence.")
-                    inferences.append("Losing potential online orders, reservations, and direct search traffic to competitors with websites.")
-                    suggested_approach = "Present a clean mobile-friendly restaurant/business demo showcasing online menu, opening hours, and direct booking/inquiry."
-                elif has_phone:
-                    score = 90
-                    confidence = "High"
-                    reason = "Genuine local business with a verified phone number, but no official website exists in public records."
-                    inferences.append("Customers searching via mobile web cannot view service catalog or operating details.")
-                    suggested_approach = "Call or WhatsApp directly with an easy-to-manage modern starter website proposal."
+                # User's score_lead logic: 70 base points for No website + review opportunity factor + phone/keyword bonus
+                if review_count < 10:
+                    rev_bonus = 24
+                elif review_count < 40:
+                    rev_bonus = 18
                 else:
-                    score = 54
-                    confidence = "Moderate"
-                    reason = "No website found, though public phone contact details are not listed."
-                    inferences.append("May need verification of primary decision maker contact channel.")
-                    suggested_approach = "Visit business address directly or connect via local social directories."
+                    rev_bonus = 12
+
+                ph_bonus = 10 if has_phone else 0
+                kw_match = any(k in (business.name or "").lower() for k in [
+                    "travel", "tour", "tourism", "holiday", "vacation", "agency", "consultant",
+                    "restaurant", "cafe", "salon", "clinic", "spa", "dentist", "gym", "fitness",
+                    "hotel", "bakery", "retail", "auto", "cleaning", "school", "builders"
+                ])
+                kw_bonus = 6 if kw_match else 0
+                score = min(98, 60 + rev_bonus + ph_bonus + kw_bonus) if has_phone else 54
+                confidence = "Very High" if (has_phone and (review_count > 0 or kw_match)) else ("High" if has_phone else "Moderate")
+
+                # User's generate_pitch logic tailored by industry
+                cat_lower = cat.lower()
+                if any(k in cat_lower for k in ("travel", "tour", "tourism", "vacation", "holiday")):
+                    reason = "No website — a travel website can showcase tour packages, destinations, itineraries, and booking options."
+                elif any(k in cat_lower for k in ("restaurant", "cafe", "food", "dining", "bakery")):
+                    reason = "No website — an online ordering website showcases menus, opening hours, customer reviews, and direct table/food bookings."
+                elif any(k in cat_lower for k in ("salon", "spa", "barber")):
+                    reason = "No website — a modern salon website allows clients to view service pricing, stylists, and book appointments 24/7."
+                elif any(k in cat_lower for k in ("clinic", "dentist", "healthcare", "hospital")):
+                    reason = "No website — a healthcare website highlights doctors, medical services, patient testimonials, and appointment requests."
+                elif any(k in cat_lower for k in ("gym", "fitness", "yoga")):
+                    reason = "No website — a gym website can display membership plans, class schedules, trainer bios, and free trial signups."
+                else:
+                    reason = f"No website — a dedicated {cat} website builds customer trust, displays service offerings, and captures direct inquiries."
+
+                if review_count < 20 and review_count > 0:
+                    inferences.append(f"Low reviews ({review_count}) — destination guides, clear itineraries, and traveler/client testimonials can strengthen this business's online presence.")
+                elif review_count >= 20:
+                    inferences.append(f"Strong customer volume ({review_count} reviews) indicates steady local demand, but missing out on direct web bookings.")
+                inferences.append("Losing potential inquiries and direct search customers to competitors with websites.")
+                suggested_approach = f"Reach out via {business.phone or 'visit'} presenting a modern mobile-friendly starter website showcasing their core services and direct booking options."
             else:
                 # Business has a website
                 if "http://" in business.website:
