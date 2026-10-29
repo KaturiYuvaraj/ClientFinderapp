@@ -810,17 +810,21 @@ class GooglePlacesCompliantProvider(BusinessDataProvider):
         self.api_key = api_key or settings.BUSINESS_API_KEY
 
     async def search(self, query: SearchRequest) -> List[NormalizedBusiness]:
-        if not self.api_key:
-            logger.info("BUSINESS_API_KEY not configured. Using live OverpassBusinessProvider.")
-            return await OverpassBusinessProvider().search(query)
+        api_key = self.api_key or settings.BUSINESS_API_KEY
+        if not api_key:
+            logger.info("BUSINESS_API_KEY not configured. Using live GoogleMapsWebProvider.")
+            return await GoogleMapsWebProvider().search(query)
 
-        text_query = f"{query.category} in {query.location}"
+        loc = query.location.strip()
+        if not loc.lower().endswith("india") and "india" not in loc.lower():
+            loc = f"{loc}, India"
+        text_query = f"{query.category} in {loc}"
         if query.keywords:
             text_query += f" {query.keywords}"
 
         headers = {
             "Content-Type": "application/json",
-            "X-Goog-Api-Key": self.api_key,
+            "X-Goog-Api-Key": api_key,
             "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.location"
         }
         payload = {
@@ -835,38 +839,93 @@ class GooglePlacesCompliantProvider(BusinessDataProvider):
                     data = resp.json()
                     places = data.get("places", [])
                     results = []
+                    seen_names = set()
                     for p in places:
-                        name = p.get("displayName", {}).get("text", "Unknown Business")
-                        phone = p.get("nationalPhoneNumber") or p.get("internationalPhoneNumber", "")
-                        website = p.get("websiteUri", "")
-                        address = p.get("formattedAddress", "")
-                        loc = p.get("location", {})
-                        place_id = p.get("id", "")
+                        name = p.get("displayName", {}).get("text", "Unknown Business").strip()
+                        if not name or _is_corporate_chain(name, {}):
+                            continue
+
+                        norm_name = re.sub(r"[^a-z0-9]", "", name.lower())
+                        if not norm_name or norm_name in seen_names:
+                            continue
+                        seen_names.add(norm_name)
+
+                        phone = str(p.get("nationalPhoneNumber") or p.get("internationalPhoneNumber") or "").strip()
+                        raw_website = str(p.get("websiteUri") or "").strip()
+                        website, has_social, has_app = _classify_digital_presence(raw_website, {})
+
+                        address = str(p.get("formattedAddress") or query.location).strip()
+                        loc_coords = p.get("location", {})
+                        place_id = str(p.get("id") or "")
+
+                        footprint = []
+                        if website:
+                            footprint.append(f"Official Website: {website}")
+                        if has_social:
+                            footprint.append(f"Social Profile Found: {raw_website}")
+                        if has_app:
+                            footprint.append("Mobile App Listed")
 
                         results.append(
                             NormalizedBusiness(
                                 name=name,
-                                category=query.category,
+                                category=query.category.title(),
                                 phone=phone,
                                 website=website,
                                 address=address,
                                 city=query.location,
-                                latitude=loc.get("latitude", 0.0),
-                                longitude=loc.get("longitude", 0.0),
-                                rating=float(p.get("rating", 0.0)),
-                                review_count=int(p.get("userRatingCount", 0)),
+                                latitude=_safe_float(loc_coords.get("latitude"), 0.0),
+                                longitude=_safe_float(loc_coords.get("longitude"), 0.0),
+                                rating=_safe_float(p.get("rating"), 0.0),
+                                review_count=_safe_int(p.get("userRatingCount"), 0),
                                 source="Google Places API (Authorized)",
-                                source_url=website or (f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else ""),
-                                provider_id=place_id
+                                source_url=website or (f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else f"https://www.google.com/maps/search/?api=1&query={quote_plus(name)}+{quote_plus(query.location)}"),
+                                provider_id=f"google_{place_id}" if place_id else None,
+                                has_social_media=has_social,
+                                has_mobile_app=has_app,
+                                digital_footprint=footprint,
                             )
                         )
+
+                    # Propagate verified brand websites across multi-branch locations
+                    brand_websites = {}
+                    brand_social = set()
+                    for b in results:
+                        norm = re.sub(r"[^a-z0-9]", "", b.name.lower())
+                        if b.website and norm not in brand_websites:
+                            brand_websites[norm] = b.website
+                        if b.has_social_media:
+                            brand_social.add(norm)
+
+                    for b in results:
+                        norm = re.sub(r"[^a-z0-9]", "", b.name.lower())
+                        if norm in brand_websites and not b.website:
+                            b.website = brand_websites[norm]
+                        if norm in brand_social:
+                            b.has_social_media = True
+
+                    # Prioritize leads with verified phone numbers
+                    results.sort(
+                        key=lambda b: (
+                            1 if (b.phone and not b.website and not b.has_mobile_app and not b.has_social_media) else 0,
+                            1 if (b.phone and not b.website) else 0,
+                            1 if not b.website else 0,
+                            1 if b.phone else 0,
+                            b.review_count,
+                        ),
+                        reverse=True,
+                    )
+
+                    logger.info(f"Google Places API: Discovered {len(results)} authorized places for '{query.category}' in '{query.location}'")
                     return results
                 else:
                     logger.error(f"Google Places API error ({resp.status_code}): {resp.text}")
         except Exception as e:
             logger.error(f"Google Places API connection exception: {e}")
 
-        return await OverpassBusinessProvider().search(query)
+        # Fallback to GoogleMapsWebProvider if API request fails
+        logger.info("Falling back to GoogleMapsWebProvider.")
+        return await GoogleMapsWebProvider().search(query)
 
 
 class GeoapifyProvider(BusinessDataProvider):
