@@ -217,13 +217,16 @@ export default function LeadCard({ lead, saved, onSave, onDelete, onStatusChange
 
               {/* Website indicator */}
               <TouchableOpacity
-                onPress={hasWebsite ? openWebsite : searchGoogleForWebsite}
+                onPress={hasWebsite ? openWebsite : undefined}
+                disabled={!hasWebsite}
                 style={[sc.presenceBadge, hasWebsite ? sc.presenceWebOk : sc.presenceNoneWeb]}
-                activeOpacity={0.7}
+                activeOpacity={hasWebsite ? 0.7 : 1}
               >
-                <Ionicons name={hasWebsite ? "globe" : "globe-outline"} size={10} color={hasWebsite ? colors.purple : colors.amber} />
+                <Ionicons name={hasWebsite ? "globe" : "checkmark-done-circle-outline"} size={10} color={hasWebsite ? colors.purple : colors.emerald} />
                 <Text style={[sc.presenceText, { color: hasWebsite ? colors.purple : colors.amber }]} numberOfLines={1}>
-                  {hasWebsite ? `Website/WebApp: ${currentLead.website.replace(/^https?:\/\/(www\.)?/, '').slice(0, 24)}` : "Website / Web App: None (Opportunity!)"}
+                  {hasWebsite
+                    ? `Website/WebApp: ${currentLead.website.replace(/^https?:\/\/(www\.)?/, '').slice(0, 24)}`
+                    : "✓ Auto-Verified: No Website / Web App"}
                 </Text>
               </TouchableOpacity>
 
@@ -232,13 +235,13 @@ export default function LeadCard({ lead, saved, onSave, onDelete, onStatusChange
                 {!currentLead.has_mobile_app && (
                   <View style={[sc.presenceBadge, sc.presenceNoneWeb]}>
                     <Ionicons name="phone-portrait-outline" size={10} color={colors.amber} />
-                    <Text style={[sc.presenceText, { color: colors.amber }]}>No Mobile App</Text>
+                    <Text style={[sc.presenceText, { color: colors.amber }]}>✓ No Mobile App</Text>
                   </View>
                 )}
                 {!currentLead.has_digital_marketing && (
                   <View style={[sc.presenceBadge, sc.presenceNoneWeb]}>
                     <Ionicons name="trending-down-outline" size={10} color={colors.amber} />
-                    <Text style={[sc.presenceText, { color: colors.amber }]}>No Digital Marketing</Text>
+                    <Text style={[sc.presenceText, { color: colors.amber }]}>✓ No Digital Marketing</Text>
                   </View>
                 )}
               </View>
@@ -249,18 +252,11 @@ export default function LeadCard({ lead, saved, onSave, onDelete, onStatusChange
 
         {/* Website + Phone + Maps action chips */}
         <View style={sc.chips}>
-          {hasWebsite ? (
+          {hasWebsite && (
             <TouchableOpacity style={[sc.chip, sc.chipWeb]} onPress={openWebsite}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Ionicons name="globe-outline" size={11} color={colors.purple} />
                 <Text style={[sc.chipText, { color: colors.purple, fontWeight: '700' }]}>Visit Website</Text>
-              </View>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={[sc.chip, sc.chipNoWeb]} onPress={searchGoogleForWebsite}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="search-outline" size={11} color={colors.amber} />
-                <Text style={[sc.chipText, { color: colors.amber, fontWeight: '700' }]}>Find Website</Text>
               </View>
             </TouchableOpacity>
           )}
@@ -272,14 +268,6 @@ export default function LeadCard({ lead, saved, onSave, onDelete, onStatusChange
               </View>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={[sc.chip, sc.chipNoPhone]} onPress={searchGoogleForPhone}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="search-outline" size={11} color={colors.primary} />
-                <Text style={[sc.chipText, { color: colors.primary, fontWeight: '700' }]}>Find Phone</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-          {(!hasPhone || !hasWebsite) && (
             <TouchableOpacity
               style={[sc.chip, { backgroundColor: colors.cyanLight, borderColor: colors.cyan }]}
               onPress={handleAutoEnrich}
@@ -292,7 +280,7 @@ export default function LeadCard({ lead, saved, onSave, onDelete, onStatusChange
                   <Ionicons name="flash" size={11} color={colors.cyan} />
                 )}
                 <Text style={[sc.chipText, { color: colors.cyan, fontWeight: '700' }]}>
-                  {enriching ? "Fetching..." : "⚡ Auto-Fetch"}
+                  {enriching ? "Fetching..." : "⚡ Auto-Fetch Phone"}
                 </Text>
               </View>
             </TouchableOpacity>

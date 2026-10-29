@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, Union
+from typing import Optional, Union, List
 from datetime import datetime, date
 
 class NormalizedBusiness(BaseModel):
@@ -18,6 +18,7 @@ class NormalizedBusiness(BaseModel):
     provider_id: Optional[str] = None
     has_social_media: Optional[bool] = False
     has_mobile_app: Optional[bool] = False
+    digital_footprint: List[str] = []
 
     @field_validator(
         "name", "category", "phone", "website", "address",

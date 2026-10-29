@@ -22,6 +22,10 @@ const COMMON_CATEGORIES = [
   { id: 'Fitness & Gyms', label: '🏋️ Fitness' },
 ];
 
+const COMMON_CITIES = [
+  'Vijayawada', 'Mumbai', 'Bangalore', 'Hyderabad', 'Delhi NCR', 'Chennai', 'Pune', 'Visakhapatnam'
+];
+
 const RADIUS_OPTIONS = ['5 km', '10 km', '20 km', '50 km'];
 
 export default function SearchForm({ onSearch, isLoading, initialValues }) {
@@ -145,7 +149,7 @@ export default function SearchForm({ onSearch, isLoading, initialValues }) {
         {/* Location Input */}
         <div className="form-group">
           <label className="form-label">
-            <span>Target City / Area</span>
+            <span>Target City / Area (India)</span>
             <MapPin size={12} color="var(--accent-emerald)" />
           </label>
           <input
@@ -153,9 +157,22 @@ export default function SearchForm({ onSearch, isLoading, initialValues }) {
             className="form-input"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            placeholder="e.g. Vijayawada, Austin, London"
+            placeholder="e.g. Mumbai, Bangalore, Hyderabad, Vijayawada"
             required
           />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+            {COMMON_CITIES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`preset-pill ${location === c ? 'active' : ''}`}
+                style={{ fontSize: '10px', padding: '2px 6px' }}
+                onClick={() => setLocation(c)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Radius */}

@@ -24,24 +24,30 @@ const SERVICES = [
 ];
 
 const LOCATION_EXAMPLES = [
-  { label: '🇺🇸 New York', value: 'New York, USA' },
-  { label: '🇺🇸 Los Angeles', value: 'Los Angeles, USA' },
-  { label: '🇺🇸 Chicago', value: 'Chicago, USA' },
-  { label: '🇺🇸 Miami', value: 'Miami, USA' },
-  { label: '🇬🇧 London', value: 'London, UK' },
-  { label: '🇬🇧 Manchester', value: 'Manchester, UK' },
-  { label: '🇨🇦 Toronto', value: 'Toronto, Canada' },
-  { label: '🇦🇺 Sydney', value: 'Sydney, Australia' },
-  { label: '🇦🇺 Melbourne', value: 'Melbourne, Australia' },
-  { label: '🇦🇪 Dubai', value: 'Dubai, UAE' },
-  { label: '🇸🇬 Singapore', value: 'Singapore' },
-  { label: '🇩🇪 Berlin', value: 'Berlin, Germany' },
-  { label: '🇫🇷 Paris', value: 'Paris, France' },
-  { label: '🇮🇳 Mumbai', value: 'Mumbai, India' },
-  { label: '🇮🇳 Bangalore', value: 'Bangalore, India' },
-  { label: '🇯🇵 Tokyo', value: 'Tokyo, Japan' },
-  { label: '🇿🇦 Cape Town', value: 'Cape Town, South Africa' },
-  { label: '🇧🇷 São Paulo', value: 'São Paulo, Brazil' },
+  { label: '🇮🇳 Mumbai', value: 'Mumbai, Maharashtra' },
+  { label: '🇮🇳 Bangalore', value: 'Bangalore, Karnataka' },
+  { label: '🇮🇳 Hyderabad', value: 'Hyderabad, Telangana' },
+  { label: '🇮🇳 Delhi NCR', value: 'Delhi, India' },
+  { label: '🇮🇳 Chennai', value: 'Chennai, Tamil Nadu' },
+  { label: '🇮🇳 Pune', value: 'Pune, Maharashtra' },
+  { label: '🇮🇳 Kolkata', value: 'Kolkata, West Bengal' },
+  { label: '🇮🇳 Ahmedabad', value: 'Ahmedabad, Gujarat' },
+  { label: '🇮🇳 Vijayawada', value: 'Vijayawada, Andhra Pradesh' },
+  { label: '🇮🇳 Visakhapatnam', value: 'Visakhapatnam, Andhra Pradesh' },
+  { label: '🇮🇳 Jaipur', value: 'Jaipur, Rajasthan' },
+  { label: '🇮🇳 Lucknow', value: 'Lucknow, Uttar Pradesh' },
+  { label: '🇮🇳 Chandigarh', value: 'Chandigarh, Punjab' },
+  { label: '🇮🇳 Indore', value: 'Indore, Madhya Pradesh' },
+  { label: '🇮🇳 Kochi', value: 'Kochi, Kerala' },
+  { label: '🇮🇳 Coimbatore', value: 'Coimbatore, Tamil Nadu' },
+  { label: '🇮🇳 Surat', value: 'Surat, Gujarat' },
+  { label: '🇮🇳 Nagpur', value: 'Nagpur, Maharashtra' },
+  { label: '🇮🇳 Patna', value: 'Patna, Bihar' },
+  { label: '🇮🇳 Bhubaneswar', value: 'Bhubaneswar, Odisha' },
+  { label: '🇮🇳 Bhopal', value: 'Bhopal, Madhya Pradesh' },
+  { label: '🇮🇳 Guntur', value: 'Guntur, Andhra Pradesh' },
+  { label: '🇮🇳 Tirupati', value: 'Tirupati, Andhra Pradesh' },
+  { label: '🇮🇳 Mysore', value: 'Mysore, Karnataka' },
 ];
 
 export default function SearchScreen({ onShowToast }) {
@@ -153,23 +159,23 @@ export default function SearchScreen({ onShowToast }) {
       <View style={s.card}>
         <View style={s.cardHeader}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Ionicons name="globe-outline" size={14} color={colors.primary} />
-            <Text style={s.cardTitle}>GLOBAL SEARCH CONSOLE</Text>
-            <Ionicons name="globe-outline" size={14} color={colors.primary} />
+            <Ionicons name="map-outline" size={14} color={colors.primary} />
+            <Text style={s.cardTitle}>CLIENT DISCOVERY CONSOLE</Text>
+            <Ionicons name="map-outline" size={14} color={colors.primary} />
           </View>
-          <Text style={s.cardSub}>Live OSM data · Any city, any country worldwide</Text>
+          <Text style={s.cardSub}>Live Google Maps data · Verified Indian cities & businesses</Text>
         </View>
 
         <View style={s.field}>
-          <Text style={s.label}>CITY / LOCATION (any country)</Text>
+          <Text style={s.label}>CITY / LOCATION (India)</Text>
           <TextInput
             style={s.input}
-            placeholder="e.g. London UK, Dubai, New York, Tokyo"
+            placeholder="e.g. Mumbai, Bangalore, Hyderabad, Vijayawada"
             placeholderTextColor={colors.textMuted}
             value={location}
             onChangeText={setLocation}
           />
-          {/* Quick-pick world cities */}
+          {/* Quick-pick Indian cities */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chips}>
             {LOCATION_EXAMPLES.map((loc) => (
               <TouchableOpacity

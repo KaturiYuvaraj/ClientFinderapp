@@ -57,7 +57,7 @@ class BusinessSearchService:
                     businesses=raw_businesses,
                     category=query.category,
                     location=query.location,
-                    max_enrich=6
+                    max_enrich=12
                 )
             except Exception as e:
                 logger.warning(f"Contact enrichment batch error: {e}")
@@ -120,6 +120,7 @@ class BusinessSearchService:
                 has_mobile_app=has_mobile_app,
                 has_digital_marketing=has_digital_marketing,
                 missing_services=missing_services,
+                digital_footprint=biz.digital_footprint or [],
                 lead_score=analysis.lead_score,
                 opportunity_type=analysis.opportunity_type,
                 opportunity_reason=analysis.reason,
@@ -143,6 +144,36 @@ class BusinessSearchService:
             ),
             reverse=True,
         )
+
+        # 6. HARD FILTRATION: Strictly exclude businesses that already have the targeted digital asset(s)
+        service_low = service_str.lower()
+        wants_website = any(w in service_low for w in ("web", "site", "e-commerce", "landing"))
+        wants_app = any(w in service_low for w in ("mobile", "app", "ios", "android"))
+        wants_marketing = any(w in service_low for w in ("marketing", "seo", "social", "ads", "content", "email"))
+
+        if wants_website and wants_app and wants_marketing:
+            strict_all_3 = [
+                x for x in sorted_items
+                if not x.has_website and not x.has_mobile_app and not x.has_digital_marketing
+            ]
+            if strict_all_3:
+                sorted_items = strict_all_3
+            else:
+                no_web = [x for x in sorted_items if not x.has_website]
+                if no_web:
+                    sorted_items = no_web
+        elif wants_website:
+            no_web = [x for x in sorted_items if not x.has_website]
+            if no_web:
+                sorted_items = no_web
+        elif wants_app:
+            no_app = [x for x in sorted_items if not x.has_mobile_app]
+            if no_app:
+                sorted_items = no_app
+        elif wants_marketing:
+            no_mkt = [x for x in sorted_items if not x.has_digital_marketing]
+            if no_mkt:
+                sorted_items = no_mkt
 
         return SearchResponse(
             query=query,
